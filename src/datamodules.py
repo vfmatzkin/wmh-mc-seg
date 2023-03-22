@@ -2,7 +2,21 @@ import os
 
 import pytorch_lightning as pl
 import torchio as tio
+from torch import Generator
 from torch.utils.data import random_split, DataLoader
+
+
+class MySubject(tio.Subject):
+    """ MySubject class
+
+    If the tolerance value is too small and the different images from the same
+    subject have slightly different values, TorchIO won't accept the images.
+    This happened with T1/FLAIR/WMH images from the WMH dataset.
+    """
+    def check_consistent_attribute(self, *args, **kwargs) -> None:
+        kwargs['relative_tolerance'] = 1e-5
+        kwargs['absolute_tolerance'] = 1e-5
+        return super().check_consistent_attribute(*args, **kwargs)
 
 
 class WMHDataModule(pl.LightningDataModule):
@@ -25,9 +39,11 @@ class WMHDataModule(pl.LightningDataModule):
     """
 
     def __init__(self, data_dir: str, batch_size: int, centers: str,
-                 train_ratio: float, patch_size: int, seed: int):
+                 train_ratio: float, patch_size: int, seed: int,
+                 samples_per_volume: int, queue_length: int,
+                 tio_num_workers: int):
         super().__init__()
-        self.data_dir = data_dir  # Path to the dataset
+        self.data_dir = os.path.expanduser(data_dir)  # Data directory
         self.batch_size = batch_size  # Batch size
         self.centers = centers  # Centers to use
         self.train_dataset = None  # Training dataset
@@ -38,6 +54,9 @@ class WMHDataModule(pl.LightningDataModule):
         self.subjects = None  # List of subjects
         self.transforms = None  # Transforms to apply to the data
         self.patch_size = (patch_size, patch_size, patch_size)  # Patch size
+        self.samples_per_volume = samples_per_volume  # Samples per volume
+        self.queue_length = queue_length  # Queue length
+        self.tio_num_workers = tio_num_workers  # TorchIO workers
 
     def prepare_data(self):
         """ Prepare the data
@@ -48,12 +67,12 @@ class WMHDataModule(pl.LightningDataModule):
         self.subjects = []
         for paths_list in paths_lists:
             if len(paths_list) < 3:
-                subject = tio.Subject(
+                subject = MySubject(
                     t1=tio.ScalarImage(paths_list[0]),
                     flair=tio.LabelMap(paths_list[1])
                 )
             else:
-                subject = tio.Subject(
+                subject = MySubject(
                     t1=tio.ScalarImage(paths_list[0]),
                     flair=tio.ScalarImage(paths_list[1]),
                     wmh=tio.LabelMap(paths_list[2])
@@ -65,29 +84,52 @@ class WMHDataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:
             n_train = int(self.train_ratio * len(images))
             n_val = len(images) - n_train
-            train_images, val_images = random_split(images, [n_train, n_val])
+            train_images, val_images = random_split(
+                images, [n_train, n_val],
+                generator=Generator().manual_seed(self.seed)
+            )
+            train_images, val_images = train_images.dataset, val_images.dataset
 
             # Some subjects have also 2 as "other pathology". We remap it to 0
             remapping = {2: 0}
             remap = tio.RemapLabels(remapping)
-            transform = tio.Lambda(
+            remap_t = tio.Lambda(
                 lambda x: remap(x) if x['type'] == 'LabelMap' else x
             )  # Apply just to LabelMaps
-            self.transforms = tio.Compose([transform])
+            self.transforms = tio.Compose([tio.ToCanonical(),
+                                           tio.Resample('t1'),
+                                           remap_t])
 
-            self.train_dataset = tio.SubjectsDataset(train_images)
-            self.val_dataset = tio.SubjectsDataset(val_images)
-
+            self.train_dataset = tio.SubjectsDataset(
+                self.samples_per_volume * train_images
+            )
+            self.val_dataset = tio.SubjectsDataset(
+                self.samples_per_volume * val_images
+            )
         if stage == "test" or stage is None:
             self.test_dataset = tio.SubjectsDataset(images)
 
     def train_dataloader(self):
-        train_sampler = tio.data.UniformSampler(patch_size=(64, 64, 64))
-        return DataLoader(self.train_dataset, self.batch_size,
-                          sampler=train_sampler)
+        train_sampler = tio.data.UniformSampler(self.patch_size)
+        patches_queue = tio.Queue(
+            self.train_dataset,
+            self.queue_length,
+            self.samples_per_volume,
+            train_sampler,
+            num_workers=self.tio_num_workers,
+        )
+        return DataLoader(patches_queue, self.batch_size)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, self.batch_size)
+        val_sampler = tio.data.UniformSampler(self.patch_size)
+        patches_queue = tio.Queue(
+            self.val_dataset,
+            self.queue_length,
+            self.samples_per_volume,
+            val_sampler,
+            num_workers=self.tio_num_workers,
+        )
+        return DataLoader(patches_queue, self.batch_size)
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, self.batch_size)
@@ -118,12 +160,17 @@ def get_paths_wmh(src_path: str, centers: str):
         k: v.split(',') for k, v in [c.split(':') for c in centers.split(';')]
     }
 
+    if not os.path.exists(src_path):
+        raise FileNotFoundError(
+            f"Source folder {src_path} does not exist. The "
+            f"dataset should be placed in this folder.")
+
     images = []
     expl_folders = []
     for split, ctrs in centers.items():
         for ctr in ctrs:
-            ctr_path = os.path.join(src_path, ctr)
-            if ctr == 'Amsterdam':  # It has 3 subfolders
+            ctr_path = os.path.join(src_path, split, ctr)
+            if ctr == 'Amsterdam':  # It has 3 sub-folders
                 for f in os.listdir(ctr_path):
                     expl_folders.append(os.path.join(ctr_path, f))
             else:

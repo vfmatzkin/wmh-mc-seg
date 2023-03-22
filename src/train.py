@@ -1,4 +1,6 @@
+import sys
 import time
+from datetime import datetime
 
 import click
 import mlflow.sklearn
@@ -7,10 +9,26 @@ import pytorch_lightning as pl
 import torch
 import torchio as tio
 from mlflow import MlflowClient
+import tempfile
 
 from datamodules import WMHDataModule
 
 print('Last run on', time.ctime())
+
+
+def prevent_logging(debug=True, force=False):
+    get_trace = getattr(sys, 'gettrace', None)
+    if (get_trace is not None and get_trace() and not debug) or force:
+        temp_dir = tempfile.TemporaryDirectory()
+        print("Debugging detected or force flag set. MLFlow won't log.")
+        mlflow.set_tracking_uri(temp_dir.name)
+    else:
+        print("MLFlow will log to the default location")
+
+
+def prepare_batch(batch):
+    return batch['t1'][tio.DATA], batch['flair'][tio.DATA], \
+        batch['wmh'][tio.DATA]
 
 
 class WMHModel(pl.LightningModule):
@@ -25,12 +43,8 @@ class WMHModel(pl.LightningModule):
         optimizer = self.optimizer_class(self.parameters(), lr=self.lr)
         return optimizer
 
-    def prepare_batch(self, batch):
-        return batch['t1'][tio.DATA], batch['flair'][tio.DATA], \
-            batch['wmh'][tio.DATA]
-
     def infer_batch(self, batch):
-        xc1, xc2, y = self.prepare_batch(batch)
+        xc1, xc2, y = prepare_batch(batch)
         x = torch.cat((xc1, xc2), dim=1)  # Concatenate the channels
         y_hat = self.net(x)
         return y_hat, y
@@ -60,17 +74,18 @@ def print_auto_logged_info(r):
     print("tags: {}".format(tags))
 
 
+@click.command()
 @click.option('--data-root', type=click.STRING, required=True,
               help="Root data folder")
 @click.option('--centers', type=click.STRING, required=True,
               help="Centers used for training (e.g.: training:Utretch)")
-@click.option('--train-ratio', type=click.INT, required=True,
+@click.option('--train-ratio', type=click.FLOAT, required=True,
               help="Ratio of training data to use for training")
 @click.option('--epochs', required=True, type=click.INT,
               help='Number of epochs to train the model')
 @click.option('--batch-size', required=True, type=click.INT,
               help='Batch size to use during training')
-@click.option('--lr', required=True, type=click.FLOAT
+@click.option('--lr', required=True, type=click.FLOAT,
               help='Learning rate for optimizer')
 @click.option('--weight-decay', required=True, type=click.FLOAT,
               help='Weight decay for optimizer')
@@ -81,25 +96,36 @@ def print_auto_logged_info(r):
               help='Random seed for reproducibility')
 @click.option('--patch-size', required=True, type=click.INT,
               help='Patch size to use for training')
+@click.option('--samples-per-volume', required=True, type=click.INT,
+              help='Number of patches to sample per volume')
+@click.option('--queue-length', required=True, type=click.INT,
+              help='Patch queue length')
+@click.option('--tio-num-workers', required=True, type=click.INT,
+              help='Patch queue length')
+@click.option('--disable-logging', required=True, type=click.BOOL,
+              help='Force disable MLFlow logging')
 def main(data_root, centers, train_ratio, epochs, batch_size, lr, weight_decay,
-         losses, seed, patch_size):
+         losses, seed, patch_size, samples_per_volume, queue_length,
+         tio_num_workers, disable_logging):
+    prevent_logging(debug=True, force=disable_logging)
     dataloader = WMHDataModule(data_root, batch_size, centers, train_ratio,
-                               seed)
+                               patch_size, seed, samples_per_volume,
+                               queue_length, tio_num_workers)
     early_stopping = pl.callbacks.early_stopping.EarlyStopping('val_loss')
     trainer = pl.Trainer(
+        accelerator='gpu',
         max_epochs=epochs,
-        progress_bar_refresh_rate=20,
         callbacks=[early_stopping],
         # gpus=1 if torch.cuda.is_available() else 0,
         # precision=16,
     )
 
     mlflow.pytorch.autolog()
-    with mlflow.start_run():
+    with mlflow.start_run() as run:
         unet = monai.networks.nets.UNet(
             dimensions=3,
             in_channels=2,
-            out_channels=3,
+            out_channels=1,
             channels=(8, 16, 32, 64),
             strides=(2, 2, 2),
         )
@@ -111,7 +137,10 @@ def main(data_root, centers, train_ratio, epochs, batch_size, lr, weight_decay,
             optimizer_class=torch.optim.AdamW,
         )
 
+        start = datetime.now()
+        print('Training started at', start)
         trainer.fit(model, dataloader)
+        print('Training duration:', datetime.now() - start)
     print_auto_logged_info(mlflow.get_run(run_id=run.info.run_id))
 
 

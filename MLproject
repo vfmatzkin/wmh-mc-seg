@@ -8,28 +8,37 @@ parameters:
     patch_size: {type: int, default: 64}
 
 entry_points:
-  train:
+  main:
     parameters:
-      data_root: ${data_root}
+      data_root: {type: string, default: '~/Code/datasets/wmh'}
       centers: {type: string, default: 'training:Utrecht'}
       train_ratio: {type: float, default: 0.8}
       epochs: {type: int, default: 1000}
       batch_size: {type: int, default: 8}
       lr: {type: float, default: 0.001}
       weight_decay: {type: float, default: 0.0001}
-      losses: {type: list, default: [["DiceLoss", 0.5], ["MSELoss", 0.5]]}
-      seed: ${seed}
-    command: "python train.py \
-        --data_root {data_root} \
-        --centers {centers}" \
-        --train_ratio {train_ratio} \
+      losses: {type: list, default: [['DiceLoss', 0.5], ['MSELoss', 0.5]]}
+      seed: {type: int, default: 42}
+      patch_size: {type: int, default: 32}
+      samples_per_volume: {type: int, default: 5}
+      queue_length: {type: int, default: 300}
+      tio_num_workers: {type: int, default: 0}
+      disable_logging: {type: bool, default: False}
+    command: "python src/train.py \
+        --data-root {data_root} \
+        --centers {centers} \
+        --train-ratio {train_ratio} \
         --epochs {epochs} \
-        --batch_size {batch_size} \
+        --batch-size {batch_size} \
         --lr {lr} \
-        --weight_decay {weight_decay} \
+        --weight-decay {weight_decay} \
         --losses {losses} \
-        --seed {seed}
-        --patch_size {patch_size}
+        --seed {seed} \
+        --patch-size {patch_size} \
+        --samples-per-volume {samples_per_volume} \
+        --queue-length {queue_length} \
+        --tio-num-workers {tio_num_workers} \
+        --disable-logging {disable_logging}"
   test:
     parameters:
       data_root: ${data_root}

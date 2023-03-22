@@ -9,7 +9,7 @@ The hyperparameters are set in the MLproject file. The hyperparameters are:
 - data_root: the root directory of the data
 
 **Training parameters**
-- train_centers: the centers used for training in the format split1:center1,center2;split2:center1,center2, where splits: [training, test] and centers: [Utretcht, Amsterdam, Singapore]
+- train_centers: the centers used for training in the format split1:center1,center2;split2:center1,center2, where splits: [training, test] and centers: [Utrecht, Amsterdam, Singapore]
 - batch_size: the batch size
 - epochs: the number of epochs
 - learning_rate: the learning rate
