@@ -13,6 +13,7 @@ class MySubject(tio.Subject):
     subject have slightly different values, TorchIO won't accept the images.
     This happened with T1/FLAIR/WMH images from the WMH dataset.
     """
+
     def check_consistent_attribute(self, *args, **kwargs) -> None:
         kwargs['relative_tolerance'] = 1e-5
         kwargs['absolute_tolerance'] = 1e-5
@@ -34,12 +35,12 @@ class WMHDataModule(pl.LightningDataModule):
     :param data_dir: Path to the dataset
     :param batch_size: Batch size
     :param centers: Centers to use. The format is: "phase1:cent1;phase2:cent2"
-    :param train_ratio: Ratio of training data to use
+    :param split_ratios: Ratio of training data to use
     :param seed: Random seed
     """
 
     def __init__(self, data_dir: str, batch_size: int, centers: str,
-                 train_ratio: float, patch_size: int, seed: int,
+                 split_ratios: list, patch_size: int, seed: int,
                  samples_per_volume: int, queue_length: int,
                  tio_num_workers: int):
         super().__init__()
@@ -47,7 +48,7 @@ class WMHDataModule(pl.LightningDataModule):
         self.batch_size = batch_size  # Batch size
         self.centers = centers  # Centers to use
         self.train_dataset = None  # Training dataset
-        self.train_ratio = train_ratio  # Ratio of training data to use
+        self.split_ratios = split_ratios  # Ratios for training/validation/test
         self.seed = seed  # Random seed
         self.val_dataset = None  # Validation dataset
         self.test_dataset = None  # Test dataset
@@ -81,24 +82,35 @@ class WMHDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         images = self.subjects
-        if stage == "fit" or stage is None:
-            n_train = int(self.train_ratio * len(images))
-            n_val = len(images) - n_train
-            train_images, val_images = random_split(
-                images, [n_train, n_val],
-                generator=Generator().manual_seed(self.seed)
-            )
-            train_images, val_images = train_images.dataset, val_images.dataset
+        n = len(images)
+        p_tr, p_va, p_te = self.split_ratios
 
+        n_train = int(p_tr * n)
+        n_val = int(p_va * n) if p_te != 0 else n - n_train
+        n_test = n - n_train - n_val
+        train_images, val_images, test_images = random_split(
+            images, [n_train, n_val, n_test],
+            generator=Generator().manual_seed(self.seed)
+        )
+        train_images = train_images.dataset
+        val_images = val_images.dataset
+        test_images = test_images.dataset
+
+        if stage == "fit" or stage is None:
             # Some subjects have also 2 as "other pathology". We remap it to 0
             remapping = {2: 0}
             remap = tio.RemapLabels(remapping)
             remap_t = tio.Lambda(
                 lambda x: remap(x) if x['type'] == 'LabelMap' else x
             )  # Apply just to LabelMaps
-            self.transforms = tio.Compose([tio.ToCanonical(),
-                                           tio.Resample('t1'),
-                                           remap_t])
+
+            self.transforms = tio.Compose([
+                tio.ZNormalization(include=['t1', 'flair']),
+                tio.ToCanonical(),
+                tio.Resample('t1'),
+                remap_t,
+                tio.OneHot(include=['wmh']),
+            ])
 
             self.train_dataset = tio.SubjectsDataset(
                 self.samples_per_volume * train_images
@@ -107,10 +119,16 @@ class WMHDataModule(pl.LightningDataModule):
                 self.samples_per_volume * val_images
             )
         if stage == "test" or stage is None:
-            self.test_dataset = tio.SubjectsDataset(images)
-
+            if self.split_ratios[2] == 0:
+                self.test_dataset = tio.SubjectsDataset(images)
+            else:
+                self.test_dataset = tio.SubjectsDataset(test_images)
+                
     def train_dataloader(self):
-        train_sampler = tio.data.UniformSampler(self.patch_size)
+        train_sampler = tio.data.LabelSampler(self.patch_size,
+                                              label_name='wmh',
+                                              label_probabilities={0: 0.5,
+                                                                   1: 0.5})
         patches_queue = tio.Queue(
             self.train_dataset,
             self.queue_length,
@@ -121,7 +139,10 @@ class WMHDataModule(pl.LightningDataModule):
         return DataLoader(patches_queue, self.batch_size)
 
     def val_dataloader(self):
-        val_sampler = tio.data.UniformSampler(self.patch_size)
+        val_sampler = tio.data.LabelSampler(self.patch_size,
+                                            label_name='wmh',
+                                            label_probabilities={0: 0.5,
+                                                                 1: 0.5})
         patches_queue = tio.Queue(
             self.val_dataset,
             self.queue_length,

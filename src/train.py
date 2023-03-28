@@ -31,13 +31,29 @@ def prepare_batch(batch):
         batch['wmh'][tio.DATA]
 
 
+def compute_metrics(y_hat, y, text=''):
+    met = {
+        text + 'dice': monai.metrics.compute_meandice(y_hat, y)
+    }
+    return met
+
+
 class WMHModel(pl.LightningModule):
     def __init__(self, net, criterion, learning_rate, optimizer_class):
+        """ WMHModel
+
+        :param net: Model instance
+        :param criterion: Loss function
+        :param learning_rate: Learning rate
+        :param optimizer_class: Optimizer class
+        """
         super().__init__()
         self.lr = learning_rate
         self.net = net
         self.criterion = criterion
         self.optimizer_class = optimizer_class
+
+        self.save_hyperparameters()
 
     def configure_optimizers(self):
         optimizer = self.optimizer_class(self.parameters(), lr=self.lr)
@@ -52,13 +68,19 @@ class WMHModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch)
         loss = self.criterion(y_hat, y)
+        metrics = compute_metrics(y_hat, y, text='train_')
+
         self.log('train_loss', loss, prog_bar=True)
+        self.log_dict(metrics)
         return loss
 
     def validation_step(self, batch, batch_idx):
         y_hat, y = self.infer_batch(batch)
         loss = self.criterion(y_hat, y)
+        metrics = compute_metrics(y_hat, y, text='val_')
+
         self.log('val_loss', loss)
+        self.log_dict(metrics)
         return loss
 
 
@@ -70,7 +92,7 @@ def print_auto_logged_info(r):
     print("run_id: {}".format(r.info.run_id))
     print("artifacts: {}".format(artifacts))
     print("params: {}".format(r.data.params))
-    print("metrics: {}".format(r.data.metrics))
+    print("metrics: {}".format(r.data.compute_metrics))
     print("tags: {}".format(tags))
 
 
@@ -79,8 +101,8 @@ def print_auto_logged_info(r):
               help="Root data folder")
 @click.option('--centers', type=click.STRING, required=True,
               help="Centers used for training (e.g.: training:Utretch)")
-@click.option('--train-ratio', type=click.FLOAT, required=True,
-              help="Ratio of training data to use for training")
+@click.option('--split-ratios', type=click.FLOAT, required=True, nargs=3,
+              help="Ratios for training/validation/test splits")
 @click.option('--epochs', required=True, type=click.INT,
               help='Number of epochs to train the model')
 @click.option('--batch-size', required=True, type=click.INT,
@@ -104,28 +126,35 @@ def print_auto_logged_info(r):
               help='Patch queue length')
 @click.option('--disable-logging', required=True, type=click.BOOL,
               help='Force disable MLFlow logging')
-def main(data_root, centers, train_ratio, epochs, batch_size, lr, weight_decay,
+def main(data_root, centers, split_ratios, epochs, batch_size, lr, weight_decay,
          losses, seed, patch_size, samples_per_volume, queue_length,
          tio_num_workers, disable_logging):
     prevent_logging(debug=True, force=disable_logging)
-    dataloader = WMHDataModule(data_root, batch_size, centers, train_ratio,
+    dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
                                patch_size, seed, samples_per_volume,
                                queue_length, tio_num_workers)
-    early_stopping = pl.callbacks.early_stopping.EarlyStopping('val_loss')
-    trainer = pl.Trainer(
-        accelerator='gpu',
-        max_epochs=epochs,
-        callbacks=[early_stopping],
-        # gpus=1 if torch.cuda.is_available() else 0,
-        # precision=16,
-    )
 
     mlflow.pytorch.autolog()
     with mlflow.start_run() as run:
+        val_chk = pl.callbacks.ModelCheckpoint(
+            monitor='val_loss',
+            dirpath='checkpoints',
+            filename=f'{run.info.run_name}--'"{epoch:02d}-{val_loss:.2f}",
+            save_top_k=3,
+            mode='min',
+        )
+
+        trainer = pl.Trainer(
+            accelerator='gpu',
+            max_epochs=epochs,
+            callbacks=[val_chk],
+            gpus=1 if torch.cuda.is_available() else 0,
+        )
+
         unet = monai.networks.nets.UNet(
             dimensions=3,
             in_channels=2,
-            out_channels=1,
+            out_channels=2,
             channels=(8, 16, 32, 64),
             strides=(2, 2, 2),
         )
