@@ -22,7 +22,7 @@ entry_points:
       patch_size: {type: int, default: 32}
       samples_per_volume: {type: int, default: 5}
       queue_length: {type: int, default: 300}
-      tio_num_workers: {type: int, default: 0}
+      tio_num_workers: {type: int, default: 4}
       disable_logging: {type: bool, default: False}
     command: "python src/train.py \
         --data-root {data_root} \

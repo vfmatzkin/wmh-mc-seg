@@ -10,6 +10,7 @@ import torch
 import torchio as tio
 from mlflow import MlflowClient
 import tempfile
+import torch.nn.functional as F
 
 from datamodules import WMHDataModule
 
@@ -33,7 +34,18 @@ def prepare_batch(batch):
 
 def compute_metrics(y_hat, y, text=''):
     met = {
-        text + 'dice': monai.metrics.compute_meandice(y_hat, y)
+        text + 'dice': torch.mean(monai.metrics.compute_dice(
+            torch.permute(
+                F.one_hot(torch.argmax(y_hat, dim=1),
+                                            num_classes=2),
+                [0, 4, 1, 2, 3]
+            ),
+            torch.permute(
+                F.one_hot(torch.argmax(y, dim=1),
+                                            num_classes=2),
+                [0, 4, 1, 2, 3]
+            )
+        , ignore_empty=False)),  # TODO Check what to do with empty patches
     }
     return met
 
@@ -62,7 +74,7 @@ class WMHModel(pl.LightningModule):
     def infer_batch(self, batch):
         xc1, xc2, y = prepare_batch(batch)
         x = torch.cat((xc1, xc2), dim=1)  # Concatenate the channels
-        y_hat = self.net(x)
+        y_hat = F.softmax(self.net(x), dim=1)  # TODO Softmax here or in loss?
         return y_hat, y
 
     def training_step(self, batch, batch_idx):
@@ -161,7 +173,7 @@ def main(data_root, centers, split_ratios, epochs, batch_size, lr, weight_decay,
 
         model = WMHModel(
             net=unet,
-            criterion=monai.losses.DiceCELoss(softmax=True),
+            criterion=monai.losses.DiceCELoss(),
             learning_rate=lr,
             optimizer_class=torch.optim.AdamW,
         )

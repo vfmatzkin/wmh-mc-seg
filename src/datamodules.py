@@ -97,26 +97,21 @@ class WMHDataModule(pl.LightningDataModule):
         test_images = test_images.dataset
 
         if stage == "fit" or stage is None:
-            # Some subjects have also 2 as "other pathology". We remap it to 0
-            remapping = {2: 0}
-            remap = tio.RemapLabels(remapping)
-            remap_t = tio.Lambda(
-                lambda x: remap(x) if x['type'] == 'LabelMap' else x
-            )  # Apply just to LabelMaps
 
+            # Some subjects have also 2 as "other pathology". We remap it to 0
             self.transforms = tio.Compose([
                 tio.ZNormalization(include=['t1', 'flair']),
                 tio.ToCanonical(),
                 tio.Resample('t1'),
-                remap_t,
+                tio.RemapLabels({2: 0}, include=['wmh']),
                 tio.OneHot(include=['wmh']),
             ])
 
             self.train_dataset = tio.SubjectsDataset(
-                self.samples_per_volume * train_images
+                self.samples_per_volume * train_images, self.transforms
             )
             self.val_dataset = tio.SubjectsDataset(
-                self.samples_per_volume * val_images
+                self.samples_per_volume * val_images, self.transforms
             )
         if stage == "test" or stage is None:
             if self.split_ratios[2] == 0:
