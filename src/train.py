@@ -1,6 +1,7 @@
 import sys
 import time
 from datetime import datetime
+import ast
 
 import click
 import mlflow.sklearn
@@ -113,7 +114,7 @@ def print_auto_logged_info(r):
               help="Root data folder")
 @click.option('--centers', type=click.STRING, required=True,
               help="Centers used for training (e.g.: training:Utretch)")
-@click.option('--split-ratios', type=click.FLOAT, required=True, nargs=3,
+@click.option('--split-ratios', type=click.STRING, required=True,
               help="Ratios for training/validation/test splits")
 @click.option('--epochs', required=True, type=click.INT,
               help='Number of epochs to train the model')
@@ -141,6 +142,8 @@ def print_auto_logged_info(r):
 def main(data_root, centers, split_ratios, epochs, batch_size, lr, weight_decay,
          losses, seed, patch_size, samples_per_volume, queue_length,
          tio_num_workers, disable_logging):
+    split_ratios = ast.literal_eval(split_ratios)
+
     prevent_logging(debug=True, force=disable_logging)
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
                                patch_size, seed, samples_per_volume,
