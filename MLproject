@@ -12,7 +12,7 @@ entry_points:
     parameters:
       data_root: {type: string, default: '~/Code/datasets/wmh'}
       centers: {type: string, default: 'training:Utrecht'}
-      split-ratios: {type: list, default: [0.7, 0.1, 0.2]}
+      split_ratios: {type: list, default: [0.7, 0.1, 0.2]}
       epochs: {type: int, default: 1000}
       batch_size: {type: int, default: 8}
       lr: {type: float, default: 0.001}
@@ -27,7 +27,7 @@ entry_points:
     command: "python src/train.py \
         --data-root {data_root} \
         --centers {centers} \
-        --split_ratios {split_ratios} \
+        --split-ratios {split_ratios} \
         --epochs {epochs} \
         --batch-size {batch_size} \
         --lr {lr} \
