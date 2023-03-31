@@ -1,100 +1,19 @@
-import sys
+import ast
+import os.path
 import time
 from datetime import datetime
-import ast
 
 import click
 import mlflow.sklearn
 import monai
 import pytorch_lightning as pl
 import torch
-import torchio as tio
 from mlflow import MlflowClient
-import tempfile
-import torch.nn.functional as F
 
+from common import prevent_logging, WMHModel
 from datamodules import WMHDataModule
 
 print('Last run on', time.ctime())
-
-
-def prevent_logging(debug=True, force=False):
-    get_trace = getattr(sys, 'gettrace', None)
-    if (get_trace is not None and get_trace() and not debug) or force:
-        temp_dir = tempfile.TemporaryDirectory()
-        print("Debugging detected or force flag set. MLFlow won't log.")
-        mlflow.set_tracking_uri(temp_dir.name)
-    else:
-        print("MLFlow will log to the default location")
-
-
-def prepare_batch(batch):
-    return batch['t1'][tio.DATA], batch['flair'][tio.DATA], \
-        batch['wmh'][tio.DATA]
-
-
-def compute_metrics(y_hat, y, text=''):
-    met = {
-        text + 'dice': torch.mean(monai.metrics.compute_dice(
-            torch.permute(
-                F.one_hot(torch.argmax(y_hat, dim=1),
-                                            num_classes=2),
-                [0, 4, 1, 2, 3]
-            ),
-            torch.permute(
-                F.one_hot(torch.argmax(y, dim=1),
-                                            num_classes=2),
-                [0, 4, 1, 2, 3]
-            )
-        , ignore_empty=False)),  # TODO Check what to do with empty patches
-    }
-    return met
-
-
-class WMHModel(pl.LightningModule):
-    def __init__(self, net, criterion, learning_rate, optimizer_class):
-        """ WMHModel
-
-        :param net: Model instance
-        :param criterion: Loss function
-        :param learning_rate: Learning rate
-        :param optimizer_class: Optimizer class
-        """
-        super().__init__()
-        self.lr = learning_rate
-        self.net = net
-        self.criterion = criterion
-        self.optimizer_class = optimizer_class
-
-        self.save_hyperparameters()
-
-    def configure_optimizers(self):
-        optimizer = self.optimizer_class(self.parameters(), lr=self.lr)
-        return optimizer
-
-    def infer_batch(self, batch):
-        xc1, xc2, y = prepare_batch(batch)
-        x = torch.cat((xc1, xc2), dim=1)  # Concatenate the channels
-        y_hat = F.softmax(self.net(x), dim=1)  # TODO Softmax here or in loss?
-        return y_hat, y
-
-    def training_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y)
-        metrics = compute_metrics(y_hat, y, text='train_')
-
-        self.log('train_loss', loss, prog_bar=True)
-        self.log_dict(metrics)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y)
-        metrics = compute_metrics(y_hat, y, text='val_')
-
-        self.log('val_loss', loss)
-        self.log_dict(metrics)
-        return loss
 
 
 def print_auto_logged_info(r):
@@ -139,35 +58,35 @@ def print_auto_logged_info(r):
               help='Patch queue length')
 @click.option('--disable-logging', required=True, type=click.BOOL,
               help='Force disable MLFlow logging')
-def main(data_root, centers, split_ratios, epochs, batch_size, lr, weight_decay,
-         losses, seed, patch_size, samples_per_volume, queue_length,
-         tio_num_workers, disable_logging):
+def train(data_root, centers, split_ratios, epochs, batch_size, lr,
+          weight_decay, losses, seed, patch_size, samples_per_volume,
+          queue_length, tio_num_workers, disable_logging):
     split_ratios = ast.literal_eval(split_ratios)
 
-    prevent_logging(debug=True, force=disable_logging)
+    prevent_logging(disable_logging)
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
-                               patch_size, seed, samples_per_volume,
-                               queue_length, tio_num_workers)
+                               patch_size, seed, tio_num_workers,
+                               samples_per_volume, queue_length)
 
     mlflow.pytorch.autolog()
     with mlflow.start_run() as run:
         val_chk = pl.callbacks.ModelCheckpoint(
             monitor='val_loss',
-            dirpath='checkpoints',
-            filename=f'{run.info.run_name}--'"{epoch:02d}-{val_loss:.2f}",
+            dirpath=os.path.join('checkpoints', run.info.run_name),
+            filename="{epoch:02d}-{val_loss:.3f}",
             save_top_k=3,
             mode='min',
         )
 
         trainer = pl.Trainer(
-            accelerator='gpu',
+            accelerator='auto',
             max_epochs=epochs,
             callbacks=[val_chk],
-            gpus=1 if torch.cuda.is_available() else 0,
+            devices='auto'
         )
 
         unet = monai.networks.nets.UNet(
-            dimensions=3,
+            spatial_dims=3,
             in_channels=2,
             out_channels=2,
             channels=(8, 16, 32, 64),
@@ -189,4 +108,4 @@ def main(data_root, centers, split_ratios, epochs, batch_size, lr, weight_decay,
 
 
 if __name__ == "__main__":
-    main()
+    train()

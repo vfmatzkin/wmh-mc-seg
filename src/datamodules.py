@@ -41,8 +41,8 @@ class WMHDataModule(pl.LightningDataModule):
 
     def __init__(self, data_dir: str, batch_size: int, centers: str,
                  split_ratios: list, patch_size: int, seed: int,
-                 samples_per_volume: int, queue_length: int,
-                 tio_num_workers: int):
+                 tio_num_workers: int, samples_per_volume: int = None,
+                 queue_length: int = None):
         super().__init__()
         self.data_dir = os.path.expanduser(data_dir)  # Data directory
         self.batch_size = batch_size  # Batch size
@@ -58,14 +58,16 @@ class WMHDataModule(pl.LightningDataModule):
         self.samples_per_volume = samples_per_volume  # Samples per volume
         self.queue_length = queue_length  # Queue length
         self.tio_num_workers = tio_num_workers  # TorchIO workers
+        self.ids = None
 
     def prepare_data(self):
         """ Prepare the data
 
         Get the paths to the images and labels and create the TorchIO dataset.
         """
-        paths_lists = get_paths_wmh(self.data_dir, self.centers)
+        paths_lists, self.ids = get_paths_wmh(self.data_dir, self.centers)
         self.subjects = []
+
         for paths_list in paths_lists:
             if len(paths_list) < 3:
                 subject = MySubject(
@@ -94,19 +96,18 @@ class WMHDataModule(pl.LightningDataModule):
         )
         train_images = train_images.dataset
         val_images = val_images.dataset
-        test_images = test_images.dataset
+        test_images, test_ids = test_images.dataset, test_images.indices
+
+        # Some subjects have also 2 as "other pathology". We remap it to 0
+        self.transforms = tio.Compose([
+            tio.ZNormalization(include=['t1', 'flair']),
+            tio.ToCanonical(),
+            tio.Resample('t1'),
+            tio.RemapLabels({2: 0}, include=['wmh']),
+            tio.OneHot(include=['wmh']),
+        ])
 
         if stage == "fit" or stage is None:
-
-            # Some subjects have also 2 as "other pathology". We remap it to 0
-            self.transforms = tio.Compose([
-                tio.ZNormalization(include=['t1', 'flair']),
-                tio.ToCanonical(),
-                tio.Resample('t1'),
-                tio.RemapLabels({2: 0}, include=['wmh']),
-                tio.OneHot(include=['wmh']),
-            ])
-
             self.train_dataset = tio.SubjectsDataset(
                 self.samples_per_volume * train_images, self.transforms
             )
@@ -115,10 +116,12 @@ class WMHDataModule(pl.LightningDataModule):
             )
         if stage == "test" or stage is None:
             if self.split_ratios[2] == 0:
-                self.test_dataset = tio.SubjectsDataset(images)
+                self.test_dataset = tio.SubjectsDataset(images,
+                                                        self.transforms)
             else:
-                self.test_dataset = tio.SubjectsDataset(test_images)
-                
+                self.test_dataset = tio.SubjectsDataset(test_images,
+                                                        self.transforms)
+
     def train_dataloader(self):
         train_sampler = tio.data.LabelSampler(self.patch_size,
                                               label_name='wmh',
@@ -182,6 +185,7 @@ def get_paths_wmh(src_path: str, centers: str):
             f"dataset should be placed in this folder.")
 
     images = []
+    ids = []
     expl_folders = []
     for split, ctrs in centers.items():
         for ctr in ctrs:
@@ -206,5 +210,5 @@ def get_paths_wmh(src_path: str, centers: str):
                     os.path.join(subj_path, 'pre', 'T1.nii.gz'),
                     os.path.join(subj_path, 'pre', 'FLAIR.nii.gz')
                 ])
-
-    return images
+            ids.append(subj)
+    return images, ids
