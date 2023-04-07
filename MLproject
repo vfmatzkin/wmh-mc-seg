@@ -43,4 +43,25 @@ entry_points:
     parameters:
       data_root: ${data_root}
       centers: {type: string, default: 'training:Utrecht;test:Utrecht,Amsterdam'}
-    command: "python validate.py {data_path} {test_dataset}"
+      split_ratios: {type: list, default: [0.7, 0.1, 0.2]}
+      model_path: {type: string, default: '../checkpoints/best.ckpt'}
+      run_id: {type: string, default: 'whimsical-hound-570'}
+      batch_size: {type: int, default: 1}
+      tio_num_workers: {type: int, default: 4}
+      seed: ${seed}
+      patch_size: ${patch_size}
+      output_dir: {type: string, default: None}
+      save_predictions: {type: bool, default: True}
+    command: "python predict.py \
+        --data-root {data_root} \
+        --centers {centers} \
+        --split-ratios {split_ratios} \
+        --model-path {model_path} \
+        --run-id {run_id} \
+        --batch-size {batch_size} \
+        --tio-num-workers {tio_num_workers} \
+        --seed {seed} \
+        --patch-size {patch_size} \
+      {%- if output_dir is defined and output_dir != None %}
+      --output-dir {output_dir} \
+      {'--save-predictions' if save_predictions else ''}"

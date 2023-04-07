@@ -10,7 +10,9 @@ import pytorch_lightning as pl
 import torch
 from mlflow import MlflowClient
 
-from common import prevent_logging, WMHModel
+import src.model
+from common import prevent_logging
+from src.model import WMHModel
 from datamodules import WMHDataModule
 
 print('Last run on', time.ctime())
@@ -21,11 +23,12 @@ def print_auto_logged_info(r):
             not k.startswith("mlflow.")}
     artifacts = [f.path for f in
                  MlflowClient().list_artifacts(r.info.run_id, "model")]
-    print("run_id: {}".format(r.info.run_id))
-    print("artifacts: {}".format(artifacts))
-    print("params: {}".format(r.data.params))
-    print("metrics: {}".format(r.data.compute_metrics))
-    print("tags: {}".format(tags))
+    print(f"run_id: {r.info.run_id}\n"
+          f"artifacts: {artifacts}\n"
+          f"params: {r.data.params}\n"
+          f"metrics: {src.model.compute_metrics}\n"
+          f"tags: {tags}")
+
 
 
 @click.command()

@@ -1,3 +1,4 @@
+import ast
 import time
 
 import click
@@ -6,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import torchio as tio
 
-from common import WMHModel
+from src.model import WMHModel
 from datamodules import WMHDataModule
 
 print('Last run on', time.ctime())
@@ -33,8 +34,8 @@ def infer_batch(net, batch):
               help="Ratios for training/validation/test splits")
 @click.option('--model-path', type=click.STRING, required=True,
               help="Path to the trained model weights")
-@click.option('--output-path', type=click.STRING, required=True,
-              help="Path to the output file where predictions will be saved")
+@click.option('--run-id', type=click.STRING, required=True,
+              help="Run ID to identify the model predictions for that run")
 @click.option('--batch-size', type=click.INT, default=1,
               help='Batch size to use during inference')
 @click.option('--tio-num-workers', required=True, type=click.INT,
@@ -43,15 +44,31 @@ def infer_batch(net, batch):
               help='Random seed for reproducibility')
 @click.option('--patch-size', required=True, type=click.INT,
               help='Patch size to use for training')
-def predict(data_root, centers, split_ratios, model_path, output_path,
-            batch_size, tio_num_workers, seed, patch_size):
+@click.option('--output-dir', type=click.STRING, default=None,
+              help='Output directory for the predictions')
+@click.option('--save-predictions/--no-save-predictions', type=click.BOOL,
+              default=True, help='Save predictions along with the Ground Truth '
+                                 'images if output-dir is not provided')
+@click.option('--csv-preds', type=click.STRING, default=None,
+              help='CSV file to save the predictions paths')
+def predict(data_root, centers, split_ratios, model_path, run_id,
+            batch_size, tio_num_workers, seed, patch_size, output_dir,
+            save_predictions, csv_preds):
+    split_ratios = ast.literal_eval(split_ratios)
+    csv_preds = f'predictions_{run_id}.csv' if csv_preds is None else csv_preds
+
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
                                patch_size, seed, tio_num_workers)
 
-    # or call with pretrained model
     model = WMHModel.load_from_checkpoint(model_path)
+    model.run_id = run_id
+    model.save_preds = save_predictions
+    model.output_dir = output_dir
+
     trainer = pl.Trainer()
     trainer.test(model, dataloader)
+
+    model.save_preds_info(csv_preds)
 
 
 if __name__ == '__main__':

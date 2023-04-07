@@ -1,4 +1,5 @@
 import os
+import random
 
 import pytorch_lightning as pl
 import torchio as tio
@@ -59,45 +60,148 @@ class WMHDataModule(pl.LightningDataModule):
         self.queue_length = queue_length  # Queue length
         self.tio_num_workers = tio_num_workers  # TorchIO workers
         self.ids = None
+        self.centers_dict = None  # Dictionary with the centers
+        self.subjects_train = None  # List of subjects for training
+        self.subjects_val = None  # List of subjects for validation
+        self.subjects_test = None  # List of subjects for testing
+
+    def get_centers_dict(self):
+        """  Convert the centers string to a dictionary
+
+        Example: "phase1:cent1;phase2:cent2" -> {"phase1": "cent1",
+        "phase2": "cent2"}
+
+        :return: Dictionary with the centers
+        """
+        self.centers_dict = {
+            k: v.split(',') for k, v in
+            [c.split(':') for c in self.centers.split(';')]
+        }
+        return self.centers_dict
+
+    def get_expl_folders(self):
+        """ Get the list of folders with the data from the centers dictionary
+
+        Use the centers dictionary to get the list of folders with the data. The
+         folders are returned in a list.
+
+        :return: List of folders with the data for each split/center.
+        """
+        expl_folders = []
+        for split, ctrs in self.centers_dict.items():
+            for ctr in ctrs:
+                ctr_path = os.path.join(self.data_dir, split, ctr)
+                if ctr == 'Amsterdam':  # It has 3 sub-folders
+                    for f in os.listdir(ctr_path):
+                        expl_folders.append(os.path.join(ctr_path, f))
+                else:
+                    expl_folders.append(ctr_path)
+        return expl_folders
+
+    def split_aux(self, aux_train_imgs, tr_im, val_im, tst_im):
+        """ Split the list of images into train, validation, and test sets
+
+        Using the split ratios, split the list of images into train, validation,
+        and test sets. The sets are returned in the lists passed by reference.
+        For reproducibility, the random seed is set before shuffling the list.
+
+        :param aux_train_imgs: List of images to split
+        :param tr_im: Train set
+        :param val_im: Validation set
+        :param tst_im: Test set
+        :return: None
+        """
+        random.seed(self.seed)
+
+        # Calculate the number of images for each set based on the splits
+        n_train = int(len(aux_train_imgs) * self.split_ratios[0])
+        n_val = int(len(aux_train_imgs) * self.split_ratios[1])
+
+        # Shuffle the list of images randomly
+        random.shuffle(aux_train_imgs)
+
+        # Split the shuffled list into train, validation, and test sets
+        train_set = aux_train_imgs[:n_train]
+        val_set = aux_train_imgs[n_train:n_train + n_val]
+        test_set = aux_train_imgs[n_train + n_val:]
+
+        # Assign the sets to the output lists passed by reference
+        tr_im.extend(train_set)
+        val_im.extend(val_set)
+        tst_im.extend(test_set)
+
+    def generate_splits(self):
+        """ Generate the splits for training, validation, and test sets
+
+        Generate the splits for training, validation, and test sets. The splits
+        are generated using the centers dictionary.
+        Each split consists in a list of lists, where each list contains the
+        paths to the T1, FLAIR, and WMH images for a subject.
+
+        :return: Tuple with the train, validation, and test sets, respectively.
+        """
+        if self.centers_dict is None:
+            self.get_centers_dict()
+        expl_folders = self.get_expl_folders()
+
+        tr_im, val_im, tst_im = [], [], []
+
+        for spl_ctr_fld in expl_folders:
+            aux_train_imgs = []
+            for subj in os.listdir(spl_ctr_fld):
+                subj_path = os.path.join(spl_ctr_fld, subj)
+                if 'training' in spl_ctr_fld.split(os.path.sep)[-3:-1]:
+                    aux_train_imgs.append([
+                        os.path.join(subj_path, 'pre', 'T1.nii.gz'),
+                        os.path.join(subj_path, 'pre', 'FLAIR.nii.gz'),
+                        os.path.join(subj_path, 'wmh.nii.gz')
+                    ])
+                else:
+                    tst_im.append([
+                        os.path.join(subj_path, 'pre', 'T1.nii.gz'),
+                        os.path.join(subj_path, 'pre', 'FLAIR.nii.gz')
+                    ])
+            self.split_aux(aux_train_imgs, tr_im, val_im, tst_im)
+
+        return tr_im, val_im, tst_im
+
+    def create_subjects(self, split):
+        """ Create the subjects for the TorchIO dataset
+
+        From a list of lists with the paths to the images and labels, create the
+        subjects for the TorchIO dataset.
+
+        :param split: List of lists with the paths to the images and labels. It
+        corresponds to a split (train, validation, or test).
+        :return subjects: List of subjects for the TorchIO dataset
+        """
+        subjects = []
+        for im in split:
+            if len(im) == 3:
+                subject = MySubject(
+                    t1=tio.ScalarImage(im[0]),
+                    flair=tio.ScalarImage(im[1]),
+                    wmh=tio.LabelMap(im[2])
+                )
+            else:
+                subject = MySubject(
+                    t1=tio.ScalarImage(im[0]),
+                    flair=tio.ScalarImage(im[1])
+                )
+            subjects.append(subject)
+        return subjects
 
     def prepare_data(self):
         """ Prepare the data
 
         Get the paths to the images and labels and create the TorchIO dataset.
         """
-        paths_lists, self.ids = get_paths_wmh(self.data_dir, self.centers)
-        self.subjects = []
-
-        for paths_list in paths_lists:
-            if len(paths_list) < 3:
-                subject = MySubject(
-                    t1=tio.ScalarImage(paths_list[0]),
-                    flair=tio.LabelMap(paths_list[1])
-                )
-            else:
-                subject = MySubject(
-                    t1=tio.ScalarImage(paths_list[0]),
-                    flair=tio.ScalarImage(paths_list[1]),
-                    wmh=tio.LabelMap(paths_list[2])
-                )
-            self.subjects.append(subject)
+        tr_sp, vl_sp, ts_sp = self.generate_splits()
+        self.subjects_train = self.create_subjects(tr_sp)
+        self.subjects_val = self.create_subjects(vl_sp)
+        self.subjects_test = self.create_subjects(ts_sp)
 
     def setup(self, stage: str):
-        images = self.subjects
-        n = len(images)
-        p_tr, p_va, p_te = self.split_ratios
-
-        n_train = int(p_tr * n)
-        n_val = int(p_va * n) if p_te != 0 else n - n_train
-        n_test = n - n_train - n_val
-        train_images, val_images, test_images = random_split(
-            images, [n_train, n_val, n_test],
-            generator=Generator().manual_seed(self.seed)
-        )
-        train_images = train_images.dataset
-        val_images = val_images.dataset
-        test_images, test_ids = test_images.dataset, test_images.indices
-
         # Some subjects have also 2 as "other pathology". We remap it to 0
         self.transforms = tio.Compose([
             tio.ZNormalization(include=['t1', 'flair']),
@@ -105,22 +209,25 @@ class WMHDataModule(pl.LightningDataModule):
             tio.Resample('t1'),
             tio.RemapLabels({2: 0}, include=['wmh']),
             tio.OneHot(include=['wmh']),
+            tio.EnsureShapeMultiple(2 ** 4),
         ])
 
         if stage == "fit" or stage is None:
             self.train_dataset = tio.SubjectsDataset(
-                self.samples_per_volume * train_images, self.transforms
+                self.samples_per_volume * self.subjects_train, self.transforms
             )
             self.val_dataset = tio.SubjectsDataset(
-                self.samples_per_volume * val_images, self.transforms
+                self.samples_per_volume * self.subjects_val, self.transforms
             )
         if stage == "test" or stage is None:
             if self.split_ratios[2] == 0:
-                self.test_dataset = tio.SubjectsDataset(images,
-                                                        self.transforms)
-            else:
-                self.test_dataset = tio.SubjectsDataset(test_images,
-                                                        self.transforms)
+                print(f'W: Test split ratio is 0. Will predict on all data '
+                      f'({self.centers}).')
+                self.subjects_test = self.subjects_train + self.subjects_val + \
+                                     self.subjects_test
+
+            self.test_dataset = tio.SubjectsDataset(self.subjects_test,
+                                                    self.transforms)
 
     def train_dataloader(self):
         train_sampler = tio.data.LabelSampler(self.patch_size,
@@ -151,64 +258,4 @@ class WMHDataModule(pl.LightningDataModule):
         return DataLoader(patches_queue, self.batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, self.batch_size)
-
-
-def get_paths_wmh(src_path: str, centers: str):
-    """ Get images and labels paths from a folder.
-
-    example parameters:
-
-    data_path = os.path.expanduser("~/Code/datasets/wmh/")
-    centers = 'training:Utrecht,Amsterdam;test:Utrecht'
-
-    This can be used, for example, for getting predictions on both training and
-    test sets centers.
-
-    This will find all the T1/FLAIR images in the 'pre' folder of Amsterdam
-    folder (for all scanners and subjects of the training set) and the Utrecht
-    test images (for the only scanner and all subjects).
-    For more details, see the documentation: https://wmh.isi.uu.nl/methods/example-python/  # noqa: E501
-
-
-    :param src_path: Path of the extracted dataset.
-    :param centers: List of centers to use.
-    :return: List of images and labels paths.
-    """
-    centers = {
-        k: v.split(',') for k, v in [c.split(':') for c in centers.split(';')]
-    }
-
-    if not os.path.exists(src_path):
-        raise FileNotFoundError(
-            f"Source folder {src_path} does not exist. The "
-            f"dataset should be placed in this folder.")
-
-    images = []
-    ids = []
-    expl_folders = []
-    for split, ctrs in centers.items():
-        for ctr in ctrs:
-            ctr_path = os.path.join(src_path, split, ctr)
-            if ctr == 'Amsterdam':  # It has 3 sub-folders
-                for f in os.listdir(ctr_path):
-                    expl_folders.append(os.path.join(ctr_path, f))
-            else:
-                expl_folders.append(ctr_path)
-
-    for folder in expl_folders:
-        for subj in os.listdir(folder):
-            subj_path = os.path.join(folder, subj)
-            if 'training' in folder.split(os.path.sep):
-                images.append([
-                    os.path.join(subj_path, 'pre', 'T1.nii.gz'),
-                    os.path.join(subj_path, 'pre', 'FLAIR.nii.gz'),
-                    os.path.join(subj_path, 'wmh.nii.gz')
-                ])
-            else:
-                images.append([
-                    os.path.join(subj_path, 'pre', 'T1.nii.gz'),
-                    os.path.join(subj_path, 'pre', 'FLAIR.nii.gz')
-                ])
-            ids.append(subj)
-    return images, ids
+        return DataLoader(self.test_dataset, self.batch_size)  # Full volume
