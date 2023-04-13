@@ -99,8 +99,8 @@ class WMHModel(pl.LightningModule):
 
             imgs = {
                 f'pred_wmh_hard_{self.run_id}.nii.gz': hard_pred,
-                f'pred_wmh_softmax_{self.run_id}.nii.gz': y_hat[i, 1],
-                f'pred_logits_{self.run_id}.nii.gz': logits[i, 1],
+                f'pred_wmh_softmax_{self.run_id}.nii.gz': y_hat[i],
+                f'pred_logits_{self.run_id}.nii.gz': logits[i],
                 f'gt_wmh_{self.run_id}.nii.gz':
                     y[i, 1].to(torch.uint8) if y is not None else None,
             }
