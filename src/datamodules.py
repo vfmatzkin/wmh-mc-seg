@@ -41,8 +41,8 @@ class WMHDataModule(pl.LightningDataModule):
     """
 
     def __init__(self, data_dir: str, batch_size: int, centers: str,
-                 split_ratios: list, patch_size: int, seed: int,
-                 tio_num_workers: int, samples_per_volume: int = None,
+                 split_ratios: list, patch_size: int = None, seed: int = 42,
+                 tio_num_workers: int = None, samples_per_volume: int = None,
                  queue_length: int = None):
         super().__init__()
         self.data_dir = os.path.expanduser(data_dir)  # Data directory

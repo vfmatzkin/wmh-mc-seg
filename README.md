@@ -1,20 +1,20 @@
 WMH MRI Segmentation
 ====================
 
-The data should be already downloaded and extracted in the `data_root` folder. For more info on the data, see the [data README](https://www.notion.so/matzkin/2-WMH-Data-download-bf662e9460c444459e3934d3099d9285).
+The data should be already downloaded and extracted in the `data_root` folder. 
+For more info on the data, see the [data README](https://www.notion.so/matzkin/2-WMH-Data-download-bf662e9460c444459e3934d3099d9285).
 
 The hyperparameters are set in the MLproject file. The hyperparameters are:
 
-**General parameters**
-- data_root: the root directory of the data
+**Parameters**
+The parameters are set in the MLproject file and have default values. Some of them which could require tuning are:
 
-**Training parameters**
-- train_centers: the centers used for training in the format split1:center1,center2;split2:center1,center2, where splits: [training, test] and centers: [Utrecht, Amsterdam, Singapore]
-- batch_size: the batch size
-- epochs: the number of epochs
-- learning_rate: the learning rate
-- weight_decay: the weight decay
-- momentum: the momentum
+- **train_centers:** Centers used in the format split1:center1,center2;split2:center1,center2, where splits: [training, test] and centers: [Utrecht, Amsterdam, Singapore]
+- **seed:** Random seed used for splitting the data.
+- **split_ratios:** List of ratios for train/validation/test splits, for the training images. The sum of the ratios should be 1.0. Note that this parameter can be used in the test phase as well.
 
-**Testing parameters**
-- test_batch_size: the batch size for testing
+    This parameter is used along with the seed parameter. Each training partition used in train_centers, will be split separately according to this seedn and in case there's more than one center used, then will be merged.
+- **samples_per_volume**: How many patches to take from each volume.
+- **queue_length**: Amount of patches loaded in memory for online processing. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
+- **tio_num_workers**: Number of subprocesses to use for data loading. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
+- 

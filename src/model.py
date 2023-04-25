@@ -2,7 +2,7 @@ import csv
 import os
 
 import SimpleITK as sitk
-import numpy as np
+import monai
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
@@ -36,6 +36,23 @@ def compute_metrics(y_hat, y, text=''):
     return result
 
 
+class DiceCE(torch.nn.Module):
+    def __init__(self):
+        """ DiceCE
+
+        This class implements the DiceCE loss function. It is a subclass of the
+        torch.nn.Module class.
+        This is an example for creating combination of losses. It's important
+        to log the loss name and the custom parameters in case of different
+        values.
+        """
+        super().__init__()
+        self.DiceCE = monai.losses.DiceCELoss()
+
+    def forward(self, y_pred, y_true):
+        return self.DiceCE(y_pred, y_true)
+
+
 class WMHModel(pl.LightningModule):
     """ WMHModel
 
@@ -44,21 +61,22 @@ class WMHModel(pl.LightningModule):
     the model and to save the predictions to the disk.
 
     :param net: Model instance
-    :param criterion: Loss function(s)
+    :param loss: Criterion function name to use. See the get_criterion method.
     :param learning_rate: Learning rate
     :param optimizer_class: Optimizer class
     """
 
     def __init__(self, net, criterion, learning_rate, optimizer_class,
-                 **kwargs):
+                 weight_decay=0, **kwargs):
         super().__init__()
+
         self.lr = learning_rate
         self.net = net
-        self.criterion = criterion
+        self.criterion = self.get_criterion(criterion)
         self.optimizer_class = optimizer_class
+        self.weight_decay = weight_decay
 
         # Test-related parameters
-        self.run_id = kwargs.get('run_id', None)
         self.save_preds = kwargs.get('save_predictions', False)
         self.output_dir = kwargs.get('output_dir', None)
         self.saved_preds = []
@@ -66,8 +84,24 @@ class WMHModel(pl.LightningModule):
         # TODO Remove when removing autolog
         self.save_hyperparameters(ignore=['net', 'criterion'])
 
+    @classmethod
+    def load_test(cls, model_path, save_predictions, output_dir):
+        model_path = os.path.abspath(model_path)
+        obj = WMHModel.load_from_checkpoint(model_path)
+        obj.model_path = os.path.abspath(model_path)
+        obj.save_preds = save_predictions
+        obj.output_dir = output_dir
+        return obj
+
+    def get_criterion(self, loss):
+        if loss == 'DiceCE':
+            return DiceCE()
+        else:
+            raise ValueError(f'Unknown loss function: {loss}')
+
     def configure_optimizers(self):
-        optimizer = self.optimizer_class(self.parameters(), lr=self.lr)
+        optimizer = self.optimizer_class(self.parameters(), lr=self.lr,
+                                         weight_decay=self.weight_decay)
         return optimizer
 
     def get_pred_folder(self, t1_path):
@@ -97,11 +131,12 @@ class WMHModel(pl.LightningModule):
             pred_folder = self.get_pred_folder(t1_path)
             hard_pred = torch.argmax(y_hat[i], dim=0).to(torch.uint8)
 
+            run_id = os.path.splitext(os.path.basename(self.model_path))[0]
             imgs = {
-                f'pred_wmh_hard_{self.run_id}.nii.gz': hard_pred,
-                f'pred_wmh_softmax_{self.run_id}.nii.gz': y_hat[i],
-                f'pred_logits_{self.run_id}.nii.gz': logits[i],
-                f'gt_wmh_{self.run_id}.nii.gz':
+                f'pred_wmh_hard_{run_id}.nii.gz': hard_pred,
+                f'pred_wmh_softmax_{run_id}.nii.gz': y_hat[i],
+                f'pred_logits_{run_id}.nii.gz': logits[i],
+                f'gt_wmh_{run_id}.nii.gz':
                     y[i, 1].to(torch.uint8) if y is not None else None,
             }
 
@@ -151,13 +186,18 @@ class WMHModel(pl.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        y_hat, y = self.infer_batch(batch, save_preds=True)
+        self.infer_batch(batch, save_preds=True)
 
-    def save_preds_info(self, preds_info_path):
+    def save_preds_info(self, preds_info_path, model_path, centers):
         """ Saves the paths to the saved predictions
 
         :param preds_info_path: Path to the file where the paths will be saved
+        :param model_path: Path to the model checkpoint
+        :param centers: List of centers used for testing
         """
+        if preds_info_path is None:
+            preds_info_path = model_path.replace('.ckpt', f'_{centers}.csv')
         with open(preds_info_path, 'w', ) as f:
             writer = csv.writer(f)
             writer.writerows(self.saved_preds)
+        print(f'Predictions info saved to {preds_info_path}')
