@@ -1,4 +1,5 @@
 import ast
+import sys
 import time
 
 import click
@@ -6,9 +7,10 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torchio as tio
+import yaml
 
-from model import WMHModel
 from datamodules import WMHDataModule
+from model import WMHModel
 
 print('Last run on', time.ctime())
 
@@ -52,6 +54,19 @@ def predict(data_root, centers, split_ratios, model_path, batch_size,
             csv_preds):
     split_ratios = ast.literal_eval(split_ratios)
 
+    params = {
+        'data_root': data_root,
+        'centers': centers,
+        'batch_size': batch_size,
+        'split_ratios': split_ratios,
+        'model_path': model_path,
+        'tio_num_workers': tio_num_workers,
+        'seed': seed,
+        'output_dir': output_dir,
+        'save_predictions': save_predictions,
+        'csv_preds': csv_preds
+    }
+
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
                                seed=seed, tio_num_workers=tio_num_workers)
 
@@ -64,4 +79,10 @@ def predict(data_root, centers, split_ratios, model_path, batch_size,
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        with open('../MLproject', 'r') as f:
+            mlproject = yaml.safe_load(f)
+        params = mlproject['entry_points']['test']['parameters']
+        sys.argv += [f"--{k.replace('_', '-')}=" \
+                     f"{v['default']}" for k, v in params.items()]
     predict()

@@ -1,5 +1,6 @@
 import ast
 import os.path
+import random
 import shutil
 import sys
 import time
@@ -7,13 +8,13 @@ from datetime import datetime
 
 import click
 import mlflow.sklearn
-import monai
 import pytorch_lightning as pl
 import torch
+import yaml
 from mlflow import MlflowClient
 
-from model import WMHModel, compute_metrics
 from datamodules import WMHDataModule
+from model import WMHModel, compute_metrics, UNet3D
 
 print('Last run on', time.ctime())
 
@@ -63,16 +64,36 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
           weight_decay, seed, patch_size, samples_per_volume, queue_length,
           tio_num_workers, custom_name):
     split_ratios = ast.literal_eval(split_ratios)
+    params = {
+        'data_root': data_root,
+        'centers': centers,
+        'split_ratios': split_ratios,
+        'epochs': epochs,
+        'batch_size': batch_size,
+        'lr': lr,
+        'dropout': dropout,
+        'weight_decay': weight_decay,
+        'seed': seed,
+        'patch_size': patch_size,
+        'samples_per_volume': samples_per_volume,
+        'queue_length': queue_length,
+        'tio_num_workers': tio_num_workers,
+        'custom_name': custom_name,
+    }
+
+    if os.getcwd().endswith('src'):
+        os.chdir('..')
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
                                patch_size, seed, tio_num_workers,
                                samples_per_volume, queue_length)
 
     run_name = custom_name if custom_name else centers
+    run_name_o = run_name
+    run_name += f'_{random.randint(1000, 9999)}'
 
-    mlflow.pytorch.autolog()
-    with mlflow.start_run() as run:
-        mlflow.set_tag('run_name', run_name)
+    with mlflow.start_run(run_name=run_name) as run:
+        mlflow.log_params(params)
 
         top3_chk = pl.callbacks.ModelCheckpoint(
             monitor='val_loss',
@@ -89,17 +110,10 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             devices='auto'
         )
 
-        unet = monai.networks.nets.UNet(
-            spatial_dims=3,
-            in_channels=2,
-            out_channels=2,
-            channels=(8, 16, 32, 64),
-            strides=(2, 2, 2),
-            dropout=dropout,
-        )
+        net = UNet3D(dropout=dropout)
 
         model = WMHModel(
-            net=unet,
+            net=net,
             criterion='DiceCE',
             learning_rate=lr,
             optimizer_class=torch.optim.AdamW,
@@ -111,7 +125,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         trainer.fit(model, dataloader)
 
         # Save best model
-        best_model_path = os.path.join('checkpoints', f'{run_name}_best.ckpt')
+        best_model_path = os.path.join('checkpoints', f'{run_name_o}_best.ckpt')
         shutil.copy(top3_chk.best_model_path, best_model_path)
 
         print('Training duration:', datetime.now() - start)
@@ -119,7 +133,10 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        train()
-    else:
-        mlflow.projects.run('..', env_manager='local')
+    if len(sys.argv) == 1:
+        with open('../MLproject', 'r') as f:
+            mlproject = yaml.safe_load(f)
+        params = mlproject['entry_points']['main']['parameters']
+        sys.argv += [f"--{k.replace('_', '-')}=" \
+                     f"{v['default']}" for k, v in params.items()]
+    train()

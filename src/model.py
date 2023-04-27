@@ -2,6 +2,7 @@ import csv
 import os
 
 import SimpleITK as sitk
+import mlflow
 import monai
 import pytorch_lightning as pl
 import torch
@@ -31,7 +32,7 @@ def compute_metrics(y_hat, y, text=''):
     dice_score = torch.mean(dice(y_hat_perm, y_perm, ignore_empty=False))
 
     # Construct the result dictionary
-    result = {text + 'dice': dice_score}
+    result = {text + 'dice': float(dice_score)}
 
     return result
 
@@ -53,6 +54,25 @@ class DiceCE(torch.nn.Module):
         return self.DiceCE(y_pred, y_true)
 
 
+def get_criterion(loss):
+    if loss == 'DiceCE':
+        return DiceCE()
+    else:
+        raise ValueError(f'Unknown loss function: {loss}')
+
+
+class UNet3D(monai.networks.nets.UNet):
+    def __init__(self, dropout=0.0):
+        super().__init__(
+            spatial_dims=3,
+            in_channels=2,
+            out_channels=2,
+            channels=(8, 16, 32, 64),
+            strides=(2, 2, 2),
+            dropout=dropout
+        )
+
+
 class WMHModel(pl.LightningModule):
     """ WMHModel
 
@@ -72,7 +92,7 @@ class WMHModel(pl.LightningModule):
 
         self.lr = learning_rate
         self.net = net
-        self.criterion = self.get_criterion(criterion)
+        self.criterion = get_criterion(criterion)
         self.optimizer_class = optimizer_class
         self.weight_decay = weight_decay
 
@@ -81,23 +101,16 @@ class WMHModel(pl.LightningModule):
         self.output_dir = kwargs.get('output_dir', None)
         self.saved_preds = []
 
-        # TODO Remove when removing autolog
-        self.save_hyperparameters(ignore=['net', 'criterion'])
+        self.save_hyperparameters(ignore=['net'])
 
     @classmethod
     def load_test(cls, model_path, save_predictions, output_dir):
-        model_path = os.path.abspath(model_path)
-        obj = WMHModel.load_from_checkpoint(model_path)
+        model_path = os.path.expanduser(model_path)
+        obj = WMHModel.load_from_checkpoint(model_path, net=UNet3D())
         obj.model_path = os.path.abspath(model_path)
         obj.save_preds = save_predictions
         obj.output_dir = output_dir
         return obj
-
-    def get_criterion(self, loss):
-        if loss == 'DiceCE':
-            return DiceCE()
-        else:
-            raise ValueError(f'Unknown loss function: {loss}')
 
     def configure_optimizers(self):
         optimizer = self.optimizer_class(self.parameters(), lr=self.lr,
@@ -172,8 +185,9 @@ class WMHModel(pl.LightningModule):
         loss = self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='train_')
 
-        self.log('train_loss', loss, prog_bar=True)
-        self.log_dict(metrics)
+        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log_dict(metrics, on_step=True, on_epoch=True)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -181,12 +195,24 @@ class WMHModel(pl.LightningModule):
         loss = self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='val_')
 
-        self.log('val_loss', loss)
-        self.log_dict(metrics)
+        self.log('val_loss', loss, on_step=True, on_epoch=True)
+        self.log_dict(metrics, on_step=True, on_epoch=True)
+
         return loss
 
     def test_step(self, batch, batch_idx):
         self.infer_batch(batch, save_preds=True)
+
+
+    def on_train_epoch_end(self):  # Todo change filtering _epoch
+        metr, ce = self.trainer.callback_metrics, self.current_epoch
+        mlflow.log_metric('train_loss', metr['train_loss_epoch'].item(), ce)
+        mlflow.log_metric('train_dice', metr['train_dice_epoch'].item(), ce)
+
+    def on_validation_epoch_end(self):
+        metr, ce = self.trainer.callback_metrics, self.current_epoch
+        mlflow.log_metric('val_loss', metr['val_loss_epoch'].item(), ce)
+        mlflow.log_metric('val_dice', metr['val_dice_epoch'].item(), ce)
 
     def save_preds_info(self, preds_info_path, model_path, centers):
         """ Saves the paths to the saved predictions

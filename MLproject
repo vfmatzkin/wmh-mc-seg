@@ -8,17 +8,16 @@ entry_points:
       data_root: {type: string, default: "~/Code/datasets/wmh"}
       centers: {type: string, default: 'training:Utrecht'}
       split_ratios: {type: string, default: [0.7, 0.1, 0.2]}
-      epochs: {type: int, default: 1000}
+      epochs: {type: int, default: 5000}
       batch_size: {type: int, default: 8}
-      lr: {type: float, default: 0.01}
+      lr: {type: float, default: 0.0015}
       dropout: {type: float, default: 0.2}
-      weight_decay: {type: float, default: 0.01}
+      weight_decay: {type: float, default: 0}
       seed: {type: int, default: 42}
       patch_size: {type: int, default: 32}
       samples_per_volume: {type: int, default: 5}
       queue_length: {type: int, default: 300}
       tio_num_workers: {type: int, default: 4}
-      custom_name: {type: string, default: None}
     command: "python src/train.py \
         --data-root {data_root} \
         --centers {centers} \
@@ -42,7 +41,6 @@ entry_points:
       batch_size: {type: int, default: 1}
       tio_num_workers: {type: int, default: 4}
       seed: {type: int, default: 42}
-      output_dir: {type: string, default: None}
     command: "python src/predict.py \
         --data-root {data_root} \
         --centers {centers} \
