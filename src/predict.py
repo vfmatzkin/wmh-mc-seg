@@ -1,4 +1,5 @@
 import ast
+import os
 import sys
 import time
 
@@ -79,8 +80,11 @@ def predict(data_root, centers, split_ratios, model_path, batch_size,
 
 
 if __name__ == '__main__':
+    if os.getcwd().endswith('src'):
+        os.chdir('..')
+
     if len(sys.argv) == 1:
-        with open('../MLproject', 'r') as f:
+        with open('MLproject', 'r') as f:
             mlproject = yaml.safe_load(f)
         params = mlproject['entry_points']['test']['parameters']
         sys.argv += [f"--{k.replace('_', '-')}=" \

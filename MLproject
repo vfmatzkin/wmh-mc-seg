@@ -9,15 +9,15 @@ entry_points:
       centers: {type: string, default: 'training:Utrecht'}
       split_ratios: {type: string, default: [0.7, 0.1, 0.2]}
       epochs: {type: int, default: 5000}
-      batch_size: {type: int, default: 8}
-      lr: {type: float, default: 0.0015}
+      batch_size: {type: int, default: 50}
+      lr: {type: float, default: 0.001}
       dropout: {type: float, default: 0.2}
       weight_decay: {type: float, default: 0}
       seed: {type: int, default: 42}
       patch_size: {type: int, default: 32}
-      samples_per_volume: {type: int, default: 5}
-      queue_length: {type: int, default: 300}
-      tio_num_workers: {type: int, default: 4}
+      samples_per_volume: {type: int, default: 20}
+      queue_length: {type: int, default: 500}
+      tio_num_workers: {type: int, default: 8}
     command: "python src/train.py \
         --data-root {data_root} \
         --centers {centers} \
@@ -35,9 +35,9 @@ entry_points:
   test:
     parameters:
       data_root: {type: string, default: "~/Code/datasets/wmh"}
-      centers: {type: string, default: 'training:Utrecht;test:Utrecht,Amsterdam'}
+      centers: {type: string, default: 'training:Utrecht,Singapore,Amsterdam'}
       split_ratios: {type: list, default: [0.7, 0.1, 0.2]}
-      model_path: {type: string, default: '~/Code/wmh-mc-seg/checkpoints/training:Utrecht_best.ckpt'}
+      model_path: {type: string, default: '~/Code/wmh-mc-seg/checkpoints/training_Utrecht_best.ckpt'}
       batch_size: {type: int, default: 1}
       tio_num_workers: {type: int, default: 4}
       seed: {type: int, default: 42}

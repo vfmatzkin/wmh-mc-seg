@@ -73,6 +73,38 @@ class UNet3D(monai.networks.nets.UNet):
         )
 
 
+def restore_metadata_as_sitk(img, source_img):
+    """ Restore the metadata from the source image
+
+    Given an image, and a source image path, load the source image and copy the
+    metadata to the images in the dictionary.
+
+    In case the img is padded, it'll be cropped according to the source image
+    shape.
+
+    :param img: Image as ndarray
+    :param source_img: Reference image path
+    :return: Image with restored metadata as SimpleITK image
+    """
+    shape = img.shape
+    source_img = sitk.ReadImage(source_img) if type(source_img) == str \
+        else source_img
+    if len(shape) == 4:
+        img_slices = []
+        for i in range(shape[0]):
+            img_slices.append(restore_metadata_as_sitk(img[i], source_img))
+        img = sitk.JoinSeries(img_slices)
+    elif len(shape) == 3:
+        img = sitk.GetImageFromArray(img)
+        img = sitk.PermuteAxes(img, (1, 2, 0))
+        if img.GetSize() != source_img.GetSize():
+            img = sitk.Crop(img, source_img.GetSize())
+        img.CopyInformation(source_img)
+
+    else:
+        raise ValueError('Image dimension not supported')
+    return img
+
 class WMHModel(pl.LightningModule):
     """ WMHModel
 
@@ -157,8 +189,8 @@ class WMHModel(pl.LightningModule):
             for img_name, img in imgs.items():
                 paths.append(os.path.join(pred_folder, img_name))
                 if img is not None:
-                    sitk.WriteImage(sitk.GetImageFromArray(img),
-                                    paths[-1])
+                    im_o_sp = restore_metadata_as_sitk(img, t1_path)
+                    sitk.WriteImage(im_o_sp, paths[-1])
             self.saved_preds.append(paths)
             print(f'saved preds for {pred_folder}')
 
@@ -203,7 +235,6 @@ class WMHModel(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         self.infer_batch(batch, save_preds=True)
 
-
     def on_train_epoch_end(self):  # Todo change filtering _epoch
         metr, ce = self.trainer.callback_metrics, self.current_epoch
         mlflow.log_metric('train_loss', metr['train_loss_epoch'].item(), ce)
@@ -222,7 +253,12 @@ class WMHModel(pl.LightningModule):
         :param centers: List of centers used for testing
         """
         if preds_info_path is None:
-            preds_info_path = model_path.replace('.ckpt', f'_{centers}.csv')
+            preds_info_path = model_path.replace(
+                '.ckpt',
+                f'_preds_{centers.replace(":", "_").replace(",", "_")}.csv')
+
+        preds_info_path = os.path.abspath(os.path.expanduser(preds_info_path))
+
         with open(preds_info_path, 'w', ) as f:
             writer = csv.writer(f)
             writer.writerows(self.saved_preds)
