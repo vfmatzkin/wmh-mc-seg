@@ -6,6 +6,40 @@ For more info on the data, see the [data README](https://www.notion.so/matzkin/2
 
 The hyperparameters are set in the MLproject file. The hyperparameters are:
 
+## Training
+
+Note that `mlflow run` is called with `--env-manager=local` to avoid reinstalling the environment each time. The dependencies can be automatically installed omitting this parameter.
+
+### Utrecht
+For training with utrecht data, run:
+```
+python /home/franco/Code/wmh-mc-seg/src/train.py 
+```
+
+or the default entry point with
+
+```
+mlflow run . --env-manager=local
+```
+
+### Amsterdam
+
+For training with amsterdam data, run:
+
+```
+mlflow run . -P centers='training:Amsterdam' --env-manager=local
+```
+### Singapore
+
+For training with singapore data, run:
+
+```
+mlflow run . -P centers='training:Singapore' --env-manager=local
+```
+
+
+
+
 **Parameters**
 The parameters are set in the MLproject file and have default values. Some of them which could require tuning are:
 
@@ -17,4 +51,3 @@ The parameters are set in the MLproject file and have default values. Some of th
 - **samples_per_volume**: How many patches to take from each volume.
 - **queue_length**: Amount of patches loaded in memory for online processing. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
 - **tio_num_workers**: Number of subprocesses to use for data loading. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
-- 

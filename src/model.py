@@ -96,14 +96,17 @@ def restore_metadata_as_sitk(img, source_img):
         img = sitk.JoinSeries(img_slices)
     elif len(shape) == 3:
         img = sitk.GetImageFromArray(img)
-        img = sitk.PermuteAxes(img, (1, 2, 0))
+        img = sitk.PermuteAxes(img, (2, 1, 0))
+        img = sitk.Flip(img, [True, True, False])  # flip the first axis
         if img.GetSize() != source_img.GetSize():
-            img = sitk.Crop(img, source_img.GetSize())
+            sz = source_img.GetSize()
+            img = img[0:sz[0], 0:sz[1], 0:sz[2]]
         img.CopyInformation(source_img)
 
     else:
         raise ValueError('Image dimension not supported')
     return img
+
 
 class WMHModel(pl.LightningModule):
     """ WMHModel
@@ -132,16 +135,18 @@ class WMHModel(pl.LightningModule):
         self.save_preds = kwargs.get('save_predictions', False)
         self.output_dir = kwargs.get('output_dir', None)
         self.saved_preds = []
+        self.patch_size = kwargs.get('patch_size', None)
 
         self.save_hyperparameters(ignore=['net'])
 
     @classmethod
-    def load_test(cls, model_path, save_predictions, output_dir):
+    def load_test(cls, model_path, save_predictions, output_dir, patch_size):
         model_path = os.path.expanduser(model_path)
         obj = WMHModel.load_from_checkpoint(model_path, net=UNet3D())
         obj.model_path = os.path.abspath(model_path)
         obj.save_preds = save_predictions
         obj.output_dir = output_dir
+        obj.patch_size = patch_size
         return obj
 
     def configure_optimizers(self):
@@ -159,7 +164,7 @@ class WMHModel(pl.LightningModule):
         os.makedirs(pred_folder, exist_ok=True)
         return pred_folder
 
-    def save_predictions(self, y_hat, y, logits, t1_paths):
+    def save_preds_tst(self, y_hat, y, logits, reference_imgs, is_test=False):
         """ Saves predictions to the disk
 
         It expects full volume images, not patches.
@@ -167,12 +172,13 @@ class WMHModel(pl.LightningModule):
         :param y_hat: Softmax output
         :param y: Ground truth
         :param logits: Logits
-        :param t1_paths: Paths to the T1 images
+        :param reference_imgs: Paths to the T1 images
+        :param is_test: Whether the model is being tested or not
         """
-        if not self.save_preds and self.output_dir is None:
+        if not is_test or (not self.save_preds and self.output_dir is None):
             return None
 
-        for i, t1_path in enumerate(t1_paths):  # For each image in the batch
+        for i, t1_path in enumerate(reference_imgs):  # For each img in batch
             pred_folder = self.get_pred_folder(t1_path)
             hard_pred = torch.argmax(y_hat[i], dim=0).to(torch.uint8)
 
@@ -194,21 +200,62 @@ class WMHModel(pl.LightningModule):
             self.saved_preds.append(paths)
             print(f'saved preds for {pred_folder}')
 
-    def infer_batch(self, batch, save_preds=False):
+    def forward_pass(self, x, batch, is_test=False):
+        if not is_test or self.patch_size is None:
+            return self.net(x)
+        else:
+            out_tensor = torch.empty((0, x.shape[1], x.shape[2], x.shape[3],
+                                      x.shape[4]))
+            for i_subj in range(x.shape[0]):
+                if 'wmh' in batch:
+                    subject = tio.Subject(
+                        t1=tio.ScalarImage(tensor=batch['t1']['data'][i_subj]),
+                        flair=tio.ScalarImage(
+                            tensor=batch['flair']['data'][i_subj]
+                        ),
+                        wmh=tio.LabelMap(tensor=batch['wmh']['data'][i_subj]))
+                grid_sampler = tio.inference.GridSampler(
+                    subject,
+                    self.patch_size,
+                    4,
+                )
+                patch_loader = torch.utils.data.DataLoader(
+                    grid_sampler,
+                    batch_size=1,
+                )
+                aggregator = tio.inference.GridAggregator(grid_sampler)
+                with torch.no_grad():
+                    for patches_batch in patch_loader:
+                        xc1 = patches_batch['t1'][tio.DATA]
+                        xc2 = patches_batch['flair'][tio.DATA]
+
+                        # Concatenate the input images along the channel dimension
+                        x = torch.cat((xc1, xc2), dim=1)
+
+                        locations = patches_batch[tio.LOCATION]
+                        logits = self.net(x)
+                        aggregator.add_batch(logits, locations)
+                output_tensor = aggregator.get_output_tensor()
+                # Append it to the out_tensor in the first channel (batch)
+                # out_tensor is a 5D tensor (batch, channels, x, y, z)
+                # and output_tensor is a 4D tensor (channels, x, y, z)
+                out_tensor = torch.cat((out_tensor, output_tensor.unsqueeze(0)))
+            return out_tensor
+
+    def infer_batch(self, batch, is_test=False):
         xc1 = batch['t1'][tio.DATA]
         xc2 = batch['flair'][tio.DATA]
+        t1_paths = batch['t1'][tio.PATH]
         y = batch['wmh'][tio.DATA] if 'wmh' in batch else None
 
         # Concatenate the input images along the channel dimension
         x = torch.cat((xc1, xc2), dim=1)
 
         # Forward pass through the neural network
-        logits = self.net(x)
+        logits = self.forward_pass(x, batch, is_test)
         y_hat = F.softmax(logits, dim=1)
 
-        if save_preds:  # Save the predictions to the disk (for testing)
-            t1_paths = batch['t1'][tio.PATH]
-            self.save_predictions(y_hat, y, logits, t1_paths)
+        self.save_preds_tst(y_hat, y, logits, t1_paths, is_test)
 
         return y_hat, y  # Return the predicted and GT masks
 
@@ -233,7 +280,7 @@ class WMHModel(pl.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        self.infer_batch(batch, save_preds=True)
+        self.infer_batch(batch, is_test=True)
 
     def on_train_epoch_end(self):  # Todo change filtering _epoch
         metr, ce = self.trainer.callback_metrics, self.current_epoch

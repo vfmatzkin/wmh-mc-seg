@@ -3,8 +3,7 @@ import random
 
 import pytorch_lightning as pl
 import torchio as tio
-from torch import Generator
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import DataLoader
 
 
 class MySubject(tio.Subject):
@@ -60,6 +59,8 @@ class WMHDataModule(pl.LightningDataModule):
         self.queue_length = queue_length  # Queue length
         self.tio_num_workers = tio_num_workers  # TorchIO workers
         self.ids = None
+        self.label_name = 'wmh'
+        self.label_probs = {0: 0.5, 1: 0.5}
         self.centers_dict = None  # Dictionary with the centers
         self.subjects_train = None  # List of subjects for training
         self.subjects_val = None  # List of subjects for validation
@@ -229,33 +230,40 @@ class WMHDataModule(pl.LightningDataModule):
             self.test_dataset = tio.SubjectsDataset(self.subjects_test,
                                                     self.transforms)
 
+    def get_dataloader(self, dataset, test=False):
+        """ Get the dataloader for the dataset
+
+        Get the dataloader for the dataset. If the patch size is not specified,
+        the dataloader will return full volume images. Otherwise, it will return
+        patches of the specified size.
+
+        For the test set, the dataloader will return full volume images always.
+
+        :param dataset: Dataset split (train, validation, or test).
+        :param test: Boolean indicating if the dataset is the test set (won't
+        return patches).
+        :return: Dataloader for the corresponding dataset.
+        """
+        if not any(self.patch_size) or test:
+            return DataLoader(dataset, self.batch_size)  # Full volume
+        else:
+            sampler = tio.data.LabelSampler(self.patch_size,
+                                            self.label_name,
+                                            self.label_probs)
+            patches_queue = tio.Queue(
+                dataset,
+                self.queue_length,
+                self.samples_per_volume,
+                sampler,
+                num_workers=self.tio_num_workers,
+            )
+            return DataLoader(patches_queue, self.batch_size)
+
     def train_dataloader(self):
-        train_sampler = tio.data.LabelSampler(self.patch_size,
-                                              label_name='wmh',
-                                              label_probabilities={0: 0.5,
-                                                                   1: 0.5})
-        patches_queue = tio.Queue(
-            self.train_dataset,
-            self.queue_length,
-            self.samples_per_volume,
-            train_sampler,
-            num_workers=self.tio_num_workers,
-        )
-        return DataLoader(patches_queue, self.batch_size)
+        return self.get_dataloader(self.train_dataset)
 
     def val_dataloader(self):
-        val_sampler = tio.data.LabelSampler(self.patch_size,
-                                            label_name='wmh',
-                                            label_probabilities={0: 0.5,
-                                                                 1: 0.5})
-        patches_queue = tio.Queue(
-            self.val_dataset,
-            self.queue_length,
-            self.samples_per_volume,
-            val_sampler,
-            num_workers=self.tio_num_workers,
-        )
-        return DataLoader(patches_queue, self.batch_size)
+        return self.get_dataloader(self.val_dataset)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, self.batch_size)  # Full volume
+        return self.get_dataloader(self.test_dataset, test=True)

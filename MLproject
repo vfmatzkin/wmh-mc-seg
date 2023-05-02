@@ -39,7 +39,7 @@ entry_points:
       split_ratios: {type: list, default: [0.7, 0.1, 0.2]}
       model_path: {type: string, default: '~/Code/wmh-mc-seg/checkpoints/training_Utrecht_best.ckpt'}
       batch_size: {type: int, default: 1}
-      tio_num_workers: {type: int, default: 4}
+      patch_size: {type: int, default: 32}
       seed: {type: int, default: 42}
     command: "python src/predict.py \
         --data-root {data_root} \
@@ -47,5 +47,5 @@ entry_points:
         --split-ratios {split_ratios} \
         --model-path {model_path} \
         --batch-size {batch_size} \
-        --tio-num-workers {tio_num_workers} \
+        --patch-size {patch_size} \
         --seed {seed}"

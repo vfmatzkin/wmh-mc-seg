@@ -5,27 +5,12 @@ import time
 
 import click
 import pytorch_lightning as pl
-import torch
-import torch.nn.functional as F
-import torchio as tio
 import yaml
 
 from datamodules import WMHDataModule
 from model import WMHModel
 
 print('Last run on', time.ctime())
-
-
-def prepare_batch(batch):
-    return batch['t1'][tio.DATA], batch['flair'][tio.DATA], \
-        batch['wmh'][tio.DATA]
-
-
-def infer_batch(net, batch):
-    xc1, xc2, y = prepare_batch(batch)
-    x = torch.cat((xc1, xc2), dim=1)  # Concatenate the channels
-    y_hat = F.softmax(net(x), dim=1)
-    return y_hat
 
 
 @click.command()
@@ -39,8 +24,8 @@ def infer_batch(net, batch):
               help="Path to the trained model weights")
 @click.option('--batch-size', type=click.INT, default=1,
               help='Batch size to use during inference')
-@click.option('--tio-num-workers', required=True, type=click.INT,
-              help='Number of workers to use for TorchIO DataLoader')
+@click.option('--patch-size', type=click.INT, default=None,
+              help='Patch size to use for prediction')
 @click.option('--seed', required=True, type=click.INT,
               help='Random seed for reproducibility')
 @click.option('--output-dir', type=click.STRING, default=None,
@@ -51,27 +36,18 @@ def infer_batch(net, batch):
 @click.option('--csv-preds', type=click.STRING, default=None,
               help='CSV file to save the predictions paths')
 def predict(data_root, centers, split_ratios, model_path, batch_size,
-            tio_num_workers, seed, output_dir, save_predictions,
-            csv_preds):
+            patch_size, seed, output_dir, save_predictions, csv_preds):
     split_ratios = ast.literal_eval(split_ratios)
-
-    params = {
-        'data_root': data_root,
-        'centers': centers,
-        'batch_size': batch_size,
-        'split_ratios': split_ratios,
-        'model_path': model_path,
-        'tio_num_workers': tio_num_workers,
-        'seed': seed,
-        'output_dir': output_dir,
-        'save_predictions': save_predictions,
-        'csv_preds': csv_preds
-    }
+    patch_size = None if patch_size == -1 else patch_size
+    if patch_size is not None:
+        print(f'Provided patch size: {patch_size}. Patch-size inference is not '
+              f'supported yet. Inference will be performed on the whole image.')
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
-                               seed=seed, tio_num_workers=tio_num_workers)
+                               seed=seed)
 
-    model = WMHModel.load_test(model_path, save_predictions, output_dir)
+    model = WMHModel.load_test(model_path, save_predictions, output_dir,
+                               patch_size)
 
     trainer = pl.Trainer()
     trainer.test(model, dataloader)
@@ -87,6 +63,6 @@ if __name__ == '__main__':
         with open('MLproject', 'r') as f:
             mlproject = yaml.safe_load(f)
         params = mlproject['entry_points']['test']['parameters']
-        sys.argv += [f"--{k.replace('_', '-')}=" \
+        sys.argv += [f"--{k.replace('_', '-')}="
                      f"{v['default']}" for k, v in params.items()]
     predict()

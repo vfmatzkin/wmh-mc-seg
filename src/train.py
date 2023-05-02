@@ -50,7 +50,7 @@ def print_auto_logged_info(r):
               help='Weight decay for optimizer')
 @click.option('--seed', required=True, type=click.INT,
               help='Random seed for reproducibility')
-@click.option('--patch-size', required=True, type=click.INT,
+@click.option('--patch-size', required=True, type=click.types.INT,
               help='Patch size to use for training')
 @click.option('--samples-per-volume', required=True, type=click.INT,
               help='Number of patches to sample per volume')
@@ -60,10 +60,14 @@ def print_auto_logged_info(r):
               help='Patch queue length')
 @click.option('--custom-name', required=False, type=click.STRING,
               help='Custom name for the run')
+@click.option('--resume-from', required=False, type=click.STRING,
+              help='Resume from checkpoint')
 def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
           weight_decay, seed, patch_size, samples_per_volume, queue_length,
-          tio_num_workers, custom_name):
+          tio_num_workers, custom_name, resume_from):
     split_ratios = ast.literal_eval(split_ratios)
+    patch_size = None if patch_size == -1 else patch_size
+    resume_from = None if resume_from == 'None' else resume_from
     params = {
         'data_root': data_root,
         'centers': centers,
@@ -79,6 +83,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         'queue_length': queue_length,
         'tio_num_workers': tio_num_workers,
         'custom_name': custom_name,
+        'resume_from': resume_from,
     }
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
@@ -91,7 +96,8 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
     run_name += f'_{random.randint(1000, 9999)}'
 
     with mlflow.start_run(run_name=run_name) as run:
-        mlflow.log_params(params)
+        if len(run.data.params) == 0:
+            mlflow.log_params(params)
 
         top3_chk = pl.callbacks.ModelCheckpoint(
             monitor='val_loss',
@@ -105,7 +111,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             accelerator='auto',
             max_epochs=epochs,
             callbacks=[top3_chk],
-            devices='auto'
+            devices='auto',
         )
 
         net = UNet3D(dropout=dropout)
@@ -120,11 +126,20 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
 
         start = datetime.now()
         print('Training started at', start)
-        trainer.fit(model, dataloader)
+        trainer.fit(model, dataloader, ckpt_path=resume_from)
 
         # Save best model
         best_model_path = os.path.join('checkpoints', f'{run_name_o}_best.ckpt')
-        shutil.copy(top3_chk.best_model_path, best_model_path)
+        if not os.path.exists(top3_chk.best_model_path):
+            print(f'Best model path does not exist: {top3_chk.best_model_path}.'
+                  f' This may happen when resuming from a checkpoint, and the '
+                  f'best model is still the one from the previous run. ')
+            if os.path.exists(resume_from):
+                print(f'Copying previous checkpoint from {resume_from} to '
+                      f'{best_model_path} as best model.')
+            shutil.copy(resume_from, best_model_path)
+        else:
+            shutil.copy(top3_chk.best_model_path, best_model_path)
 
         print('Training duration:', datetime.now() - start)
     print_auto_logged_info(mlflow.get_run(run_id=run.info.run_id))
@@ -138,6 +153,6 @@ if __name__ == "__main__":
         with open('MLproject', 'r') as f:
             mlproject = yaml.safe_load(f)
         params = mlproject['entry_points']['main']['parameters']
-        sys.argv += [f"--{k.replace('_', '-')}=" \
+        sys.argv += [f"--{k.replace('_', '-')}="
                      f"{v['default']}" for k, v in params.items()]
     train()
