@@ -46,6 +46,8 @@ def print_auto_logged_info(r):
               help='Learning rate for optimizer')
 @click.option('--dropout', required=True, type=click.FLOAT,
               help='Dropout probability for the model')
+@click.option('--loss', required=True, type=click.STRING,
+              help='Loss function to use')
 @click.option('--weight-decay', required=True, type=click.FLOAT,
               help='Weight decay for optimizer')
 @click.option('--seed', required=True, type=click.INT,
@@ -63,8 +65,8 @@ def print_auto_logged_info(r):
 @click.option('--resume-from', required=False, type=click.STRING,
               help='Resume from checkpoint')
 def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
-          weight_decay, seed, patch_size, samples_per_volume, queue_length,
-          tio_num_workers, custom_name, resume_from):
+          loss, weight_decay, seed, patch_size, samples_per_volume,
+          queue_length, tio_num_workers, custom_name, resume_from):
     split_ratios = ast.literal_eval(split_ratios)
     patch_size = None if patch_size == -1 else patch_size
     resume_from = None if resume_from == 'None' else resume_from
@@ -76,6 +78,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         'batch_size': batch_size,
         'lr': lr,
         'dropout': dropout,
+        'loss': loss,
         'weight_decay': weight_decay,
         'seed': seed,
         'patch_size': patch_size,
@@ -118,7 +121,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
 
         model = WMHModel(
             net=net,
-            criterion='DiceCE',
+            criterion=loss,
             learning_rate=lr,
             optimizer_class=torch.optim.AdamW,
             weight_decay=weight_decay,

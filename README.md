@@ -12,11 +12,26 @@ Note that `mlflow run` is called with `--env-manager=local` to avoid reinstallin
 
 ### Utrecht
 For training with utrecht data, run:
+
+#### Loss: DiceCE
+
 ```
-python /home/franco/Code/wmh-mc-seg/src/train.py 
+mlflow run . --env-manager=local
 ```
 
-or the default entry point with
+#### Loss: Focal
+
+```
+mlflow run . -P loss=focal --env-manager=local
+```
+
+#### Loss: CE + MEEP
+
+```
+mlflow run . --env-manager=local
+```
+
+#### Loss: Dice + MEEP
 
 ```
 mlflow run . --env-manager=local
@@ -37,7 +52,26 @@ For training with singapore data, run:
 mlflow run . -P centers='training:Singapore' --env-manager=local
 ```
 
+## Predict
 
+### Utrecht
+
+```
+mlflow run . -e test --env-manager=local
+```
+
+
+### Amsterdam
+
+```
+mlflow run . -e test -P model_path=~/Code/wmh-mc-seg/checkpoints/training_Amsterdam_best.ckpt --env-manager=local
+```
+
+### Singapore
+
+```
+mlflow run . -e test -P model_path=~/Code/wmh-mc-seg/checkpoints/training_Singapore_best.ckpt --env-manager=local
+``` 
 
 
 **Parameters**

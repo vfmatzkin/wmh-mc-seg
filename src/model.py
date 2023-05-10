@@ -4,11 +4,105 @@ import os
 import SimpleITK as sitk
 import mlflow
 import monai
+import monai.losses as monai_losses
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torchio as tio
 from monai.metrics import compute_dice as dice
+
+
+class DiceLoss:
+    def __init__(self, include_background=False, to_onehot_y=True,
+                 softmax=True):
+        self.include_background = include_background
+        self.to_onehot_y = to_onehot_y
+        self.softmax = softmax
+
+    def __call__(self, y_pred, y_true):
+        if self.to_onehot_y:
+            y_true = tio.utils.one_hot(y_true, num_classes=y_pred.shape[1])
+        if self.softmax:
+            y_pred = F.softmax(y_pred, dim=1)
+
+        dice = monai_losses.DiceLoss(include_background=self.include_background,
+                                     reduction="mean")
+        return 1 - dice(y_pred, y_true)
+
+
+class DSL:
+    def __init__(self, reg_function=None, u=0):
+        self.reg_function = reg_function
+        self.u = u
+
+    def __call__(self, y_pred, y_true):
+        dice_loss = DiceLoss(include_background=False, to_onehot_y=True,
+                             softmax=True)
+        dice = dice_loss(y_pred, y_true)
+        if self.reg_function is None:
+            return dice
+        else:
+            reg = self.reg_function(y_true, y_pred)
+            return (dice + self.u * reg)
+
+
+class CE:
+    def __init__(self, reg_function=None, u=0):
+        self.reg_function = reg_function
+        self.u = u
+
+    def __call__(self, y_pred, y_true):
+        y_true = y_true.float()
+        ce = F.binary_cross_entropy_with_logits(y_pred, y_true,
+                                                reduction="mean")
+        if self.reg_function is None:
+            return ce, 0
+        else:
+            reg = self.reg_function(y_true, y_pred)
+            return (ce - self.u * reg), reg
+
+
+class ME:
+    def __call__(self, y_pred, y_true):
+        en = self.entropy_coefficient(y_true, y_pred, EP=False)
+        return en
+
+    def entropy_coefficient(self, y_true, y_pred, EP):
+        y_pred_lm = torch.argmax(y_pred, dim=1)
+        y_true_lm = torch.argmax(y_true, dim=1)
+        if EP:
+            misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
+            entropy = torch.mean(
+                F.binary_cross_entropy(y_pred, y_pred, reduction="none"),
+                dim=1) * misclassified_pixels
+            entropy = torch.sum(entropy) / torch.sum(misclassified_pixels)
+        else:
+            entropy = torch.mean(
+                F.binary_cross_entropy(y_pred, y_pred, reduction="none"), dim=1)
+            entropy = torch.mean(entropy)
+        return entropy
+
+
+class MEEP:
+    def __call__(self, y_pred, y_true):
+        en = self.entropy_coefficient(y_true, y_pred, EP=True)
+        return en
+
+    def entropy_coefficient(self, y_true, y_pred, EP):
+        y_pred_lm = torch.argmax(y_pred, dim=1)
+        y_true_lm = torch.argmax(y_true, dim=1)
+        if EP:
+            misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
+            entropy = torch.mean(
+                F.binary_cross_entropy(y_pred, y_pred, reduction="none"),
+                dim=1) * misclassified_pixels
+            entropy = torch.sum(entropy) / torch.sum(misclassified_pixels)
+        else:
+            entropy = torch.mean(
+                F.binary_cross_entropy(y_pred, y_pred, reduction="none"),
+                dim=1)
+            entropy = torch.mean(entropy)
+        return entropy
 
 
 def compute_metrics(y_hat, y, text=''):
@@ -55,10 +149,21 @@ class DiceCE(torch.nn.Module):
 
 
 def get_criterion(loss):
-    if loss == 'DiceCE':
-        return DiceCE()
-    else:
-        raise ValueError(f'Unknown loss function: {loss}')
+    match loss.lower():
+        case 'crossentropy' | 'ce':
+            return torch.nn.CrossEntropyLoss()
+        case 'dice':
+            return monai.losses.DiceLoss()
+        case 'dicece' | 'dicecrossentropy':
+            return DiceCE()
+        case 'focal':
+            return monai.losses.FocalLoss()
+        case 'cemeep' | 'crosentropymeep':
+            return CEMEEP()
+        case 'dicemeep':
+            return DiceMEEP()
+        case _:
+            raise ValueError(f'Unknown loss function: {loss}')
 
 
 class UNet3D(monai.networks.nets.UNet):
