@@ -8,7 +8,6 @@ import pandas as pd
 import seaborn as sns
 from calibration import get_ece
 from medpy.metric.binary import dc as dice_score
-# from scipy.stats import entropy
 from sklearn.calibration import calibration_curve
 
 sns.set_style('whitegrid')
@@ -17,12 +16,12 @@ colors = ['#3498db', '#2ecc71', '#e74c3c']  # colors for each center
 centers = ['utrecht', 'singapore', 'amsterdam']
 csv_cols = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh']
 
-
 def get_array_from_nifti(path):
     return sitk.GetArrayFromImage(sitk.ReadImage(path))
 
 
-def dice_scores(base_center):
+def dice_scores(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
     dc = {}
     for center in centers:
         df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
@@ -54,17 +53,13 @@ def dice_scores(base_center):
     fig.subplots_adjust(top=0.85, wspace=0.05)
 
 
-def entropy(probs):
-    """ Compute entropy for a flattened array of probabilities
-
-    :param probs: array of probabilities
-    :return:
-    """
-
-    return -np.mean(probs * np.log(probs))
+def entropy(probs, eps=1e-3):
+    probs = np.clip(probs, eps, 1 - eps)
+    return np.mean(-probs * np.log(probs) - (1 - probs) * np.log(1 - probs))
 
 
-def entropy_segment(base_center):
+def entropy_segment(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
     ent = {}
 
     for center in centers:
@@ -78,17 +73,19 @@ def entropy_segment(base_center):
             ent[center][subj] = {'pred': [], 'gt': []}
 
             pred_softmax = nib.load(pred_softmax_path).get_fdata()
+            gt = nib.load(gt_path).get_fdata()
+
             pos_class = pred_softmax[:, :, :, 1].flatten()
+            gt_class = gt.flatten()
 
             thres_pos = np.where(pos_class >= 0.5)[0]
-            filt_softmax = pos_class[thres_pos]
+            thres_gt = np.where(gt_class == 1)[0]
 
-            gt = nib.load(gt_path).get_fdata().flatten()
-            gt_1 = np.where(gt == 1)[0]
-            thres_gt = pos_class[gt_1]
+            filt_softmax = pos_class[thres_pos]
+            filt_gt = pos_class[thres_gt]
 
             entropy_pred = entropy(filt_softmax)
-            entropy_gt = entropy(thres_gt)
+            entropy_gt = entropy(filt_gt)
 
             ent[center][subj]['pred'].append(entropy_pred)
             ent[center][subj]['gt'].append(entropy_gt)
@@ -103,11 +100,13 @@ def entropy_segment(base_center):
     for i, center in enumerate(centers):
         values = list(ent[center].values())
         values_pred = [x['pred'][0] for x in values]
+        values_gt = [x['gt'][0] for x in values]
 
         # Plot the boxplots for softmax predicted entropy
         axs[i].boxplot(values_pred, positions=[0], widths=0.6)
+        axs[i].boxplot(values_gt, positions=[1], widths=0.6)
 
-        axs[i].set_xticklabels(['Pred'])
+        axs[i].set_xticklabels(['Softmax > 0.5', 'Softmax in GT==1'])
         axs[i].set_title(f"{center}")
 
 
@@ -115,7 +114,8 @@ def append_round(imgs, img, decimals=2):
     return np.concatenate((imgs, np.around(np.array(img), decimals)))
 
 
-def probs_hist(base_center):
+def probs_hist(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
     for center in centers:
         imgs_smx_0_0, imgs_smx_0_1, imgs_smx_1_0, imgs_smx_1_1 = \
             np.array([]), np.array([]), np.array([]), np.array([])
@@ -161,7 +161,8 @@ def probs_hist(base_center):
         axs[1, 1].set_title(f"{center} - Class 1 - GT 1")
 
 
-def logits_hist(base_center):
+def logits_hist(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
     for center in centers:
         imgs_logits_0_0, imgs_logits_0_1, imgs_logits_1_0, imgs_logits_1_1 = \
             np.array([]), np.array([]), np.array([]), np.array([])
@@ -211,7 +212,8 @@ def logits_hist(base_center):
         axs[1, 1].set_title(f"{center} - Class 1 - GT 1")
 
 
-def ece_reliability(base_center):
+def ece_reliability_sym(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
     for center in centers:
         df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
         df.columns = csv_cols
@@ -231,12 +233,10 @@ def ece_reliability(base_center):
             gt_one_hot = np.eye(2, dtype=np.uint8)[gt_wmh.astype(int)]
 
             # Flatten the arrays and append to numpy array
-            pos_indices_0 = np.where(gt_one_hot[:, :, :, 0].flatten() == 1)[0]
-            pos_indices_1 = np.where(gt_one_hot[:, :, :, 1].flatten() == 1)[0]
-            preds_0 = np.concatenate((preds_0, pred_softmax[0].flatten()[pos_indices_0]))
-            preds_1 = np.concatenate((preds_1, pred_softmax[1].flatten()[pos_indices_1]))
-            gt_0 = np.concatenate((gt_0, gt_one_hot[:, :, :, 0].flatten()[pos_indices_0]))
-            gt_1 = np.concatenate((gt_1, gt_one_hot[:, :, :, 1].flatten()[pos_indices_1]))
+            preds_0 = np.concatenate((preds_0, pred_softmax[0].flatten()))
+            preds_1 = np.concatenate((preds_1, pred_softmax[1].flatten()))
+            gt_0 = np.concatenate((gt_0, gt_one_hot[:, :, :, 0].flatten()))
+            gt_1 = np.concatenate((gt_1, gt_one_hot[:, :, :, 1].flatten()))
 
         # Define the number of bins for the reliability diagram
         num_bins = 10
@@ -250,7 +250,6 @@ def ece_reliability(base_center):
                                                       n_bins=num_bins)
 
         ece_0 = get_ece(preds_0, gt_0)
-        ece_1 = get_ece(preds_1, gt_1)
 
         # Plot the reliability diagram
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -261,6 +260,103 @@ def ece_reliability(base_center):
         ax.set_ylabel('Empirical probability')
         ax.set_ylim([-0.05, 1.05])
         ax.legend()
-        ax.set_title(f"{center} - Reliability diagram\nECE: {ece_0:.4f} (BG), {ece_1:.4f} (FG)")
+        ax.set_title(f"{center} - Reliability diagram\nECE: {ece_0:.4f}")
 
+    plt.show()
+
+
+def ece_reliability(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
+    for center in centers:
+        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
+        df.columns = csv_cols
+
+        preds_1 = np.array([])
+        gt_1 = np.array([], dtype=np.uint8)
+
+        for i, row in df.iterrows():
+            _, pred_wmh_softmax, _, gt_wmh = row
+
+            pred_softmax = get_array_from_nifti(pred_wmh_softmax)
+            gt_wmh = get_array_from_nifti(gt_wmh)
+
+            # One-hot encode the ground truth labels
+            gt_one_hot = np.eye(2, dtype=np.uint8)[gt_wmh.astype(int)]
+
+            # Flatten the arrays and append to numpy array
+            preds_1 = np.concatenate((preds_1, pred_softmax[1].flatten()))
+            gt_1 = np.concatenate((gt_1, gt_one_hot[:, :, :, 1].flatten()))
+
+        # Define the number of bins for the reliability diagram
+        num_bins = 10
+
+        emp_probs_1, pred_probs_1 = calibration_curve(gt_1, preds_1,
+                                                      n_bins=num_bins)
+
+        ece_0 = get_ece(preds_1, gt_1)
+
+        # Plot the reliability diagram
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.plot([0, 1], [0, 1], 'k:', label='Perfectly calibrated')
+        ax.plot(pred_probs_1, emp_probs_1, 'o-', label='Foreground')
+        ax.set_xlabel('Predicted probability')
+        ax.set_ylabel('Empirical probability')
+        ax.set_ylim([-0.05, 1.05])
+        ax.legend()
+        ax.set_title(f"{center} - Reliability diagram\nECE: {ece_0:.4f}")
+
+    plt.show()
+
+
+def dice_vs_entropy(base_center, path_csvs=None):
+    """ Dice vs entropy plot
+
+    Compute for each subject the dice score and the entropy of the softmax, and
+    place them in a scatter plot (dice in the y-axis and entropy in the x-axis).
+
+    Each center will be colored differently.
+
+    The y axis limits are 0-1 and the x axis its 0 to 0.2 more than the maximum
+
+    :param base_center:
+    :return:
+    """
+    os.chdir(path_csvs) if path_csvs else None
+    for center in centers:
+        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
+        df.columns = csv_cols
+
+        dice_ent = {center: []}
+
+        for i, row in df.iterrows():
+            pred_hard_path, pred_softmax_path, _, gt_path = row
+
+            pred_hard = nib.load(pred_hard_path).get_fdata()
+            gt = nib.load(gt_path).get_fdata()
+
+            # Compute dice scores
+            dice_hard = dice_score(pred_hard, gt)
+
+            # Compute entropy
+            pred_softmax = nib.load(pred_softmax_path).get_fdata()
+            pos_class = pred_softmax[:, :, :, 1].flatten()
+            thres_pos = np.where(pos_class >= 0.5)[0]
+            filt_softmax = pos_class[thres_pos]
+
+            ent = entropy(filt_softmax)
+
+            dice_ent[center].append((dice_hard, ent))
+
+        dice_ent[center] = np.array(dice_ent[center])
+
+        plt.scatter(dice_ent[center][:, 1], dice_ent[center][:, 0],
+                    label=center)
+
+    plt.xlabel("Entropy")
+    plt.ylabel("Dice score")
+
+    plt.xlim([0, 0.2 + np.max(dice_ent[center][:, 1])])
+    plt.ylim([0, 1])
+
+    plt.legend()
     plt.show()

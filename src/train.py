@@ -95,7 +95,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
 
     run_name = custom_name if custom_name \
         else centers.replace(':', '_').replace(',', '_')
-    run_name_o = run_name
+    run_name += f'_{loss}'
     run_name += f'_{random.randint(1000, 9999)}'
 
     with mlflow.start_run(run_name=run_name) as run:
@@ -132,7 +132,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         trainer.fit(model, dataloader, ckpt_path=resume_from)
 
         # Save best model
-        best_model_path = os.path.join('checkpoints', f'{run_name_o}_best.ckpt')
+        best_model_path = os.path.join('checkpoints', f'{run_name}_best.ckpt')
         if not os.path.exists(top3_chk.best_model_path):
             print(f'Best model path does not exist: {top3_chk.best_model_path}.'
                   f' This may happen when resuming from a checkpoint, and the '
@@ -158,4 +158,26 @@ if __name__ == "__main__":
         params = mlproject['entry_points']['main']['parameters']
         sys.argv += [f"--{k.replace('_', '-')}="
                      f"{v['default']}" for k, v in params.items()]
+    # Else, set MLproject as default parameters and update with passed args
+    elif len(sys.argv) > 1:
+        with open('MLproject', 'r') as f:
+            mlproject = yaml.safe_load(f)
+        params = mlproject['entry_points']['main']['parameters']
+        for arg in sys.argv[1:]:
+            if arg.startswith('--'):
+                # The value could be after a '=' or in the next arg
+                if '=' in arg:
+                    key, value = arg.split('=')
+                else:
+                    key = arg
+                    value = sys.argv[sys.argv.index(arg) + 1]
+                key = key.replace('--', '').replace('-', '_')
+                if key in params:
+                    params[key]['default'] = value
+                else:
+                    print(f'Unknown parameter {key}.')
+                    sys.exit(1)
+        sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}="
+                                    f"{v['default']}" for k, v in params.items()]
+
     train()

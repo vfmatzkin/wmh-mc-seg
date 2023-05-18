@@ -16,25 +16,25 @@ For training with utrecht data, run:
 #### Loss: DiceCE
 
 ```
-mlflow run . --env-manager=local
+mlflow run . -P centers='training:Utrecht' --env-manager=local
 ```
 
 #### Loss: Focal
 
 ```
-mlflow run . -P loss=focal --env-manager=local
+mlflow run . -P centers='training:Utrecht' -P loss=focal --env-manager=local
 ```
 
 #### Loss: CE + MEEP
 
 ```
-mlflow run . --env-manager=local
+mlflow run . -P centers='training:Utrecht' -P loss=MEEP --env-manager=local
 ```
 
 #### Loss: Dice + MEEP
 
 ```
-mlflow run . --env-manager=local
+mlflow run . -P centers='training:Utrecht' loss=DiceMEEP --env-manager=local
 ```
 
 ### Amsterdam

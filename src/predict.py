@@ -65,4 +65,26 @@ if __name__ == '__main__':
         params = mlproject['entry_points']['test']['parameters']
         sys.argv += [f"--{k.replace('_', '-')}="
                      f"{v['default']}" for k, v in params.items()]
+    elif len(sys.argv) > 1:
+        with open('MLproject', 'r') as f:
+            mlproject = yaml.safe_load(f)
+        params = mlproject['entry_points']['test']['parameters']
+        for arg in sys.argv[1:]:
+            if arg.startswith('--'):
+                # The value could be after a '=' or in the next arg
+                if '=' in arg:
+                    key, value = arg.split('=')
+                else:
+                    key = arg
+                    value = sys.argv[sys.argv.index(arg) + 1]
+                key = key.replace('--', '').replace('-', '_')
+                if key in params:
+                    params[key]['default'] = value
+                else:
+                    print(f'Unknown parameter {key}.')
+                    sys.exit(1)
+        sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}="
+                                    f"{v['default']}" for k, v in
+                                    params.items()]
+
     predict()

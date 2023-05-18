@@ -30,37 +30,6 @@ class DiceLoss:
         return 1 - dice(y_pred, y_true)
 
 
-class DSL:
-    def __init__(self, reg_function=None, u=0):
-        self.reg_function = reg_function
-        self.u = u
-
-    def __call__(self, y_pred, y_true):
-        dice_loss = DiceLoss(include_background=False, to_onehot_y=True,
-                             softmax=True)
-        dice = dice_loss(y_pred, y_true)
-        if self.reg_function is None:
-            return dice
-        else:
-            reg = self.reg_function(y_true, y_pred)
-            return (dice + self.u * reg)
-
-
-class CE:
-    def __init__(self, reg_function=None, u=0):
-        self.reg_function = reg_function
-        self.u = u
-
-    def __call__(self, y_pred, y_true):
-        y_true = y_true.float()
-        ce = F.binary_cross_entropy_with_logits(y_pred, y_true,
-                                                reduction="mean")
-        if self.reg_function is None:
-            return ce, 0
-        else:
-            reg = self.reg_function(y_true, y_pred)
-            return (ce - self.u * reg), reg
-
 
 class ME:
     def __call__(self, y_pred, y_true):
@@ -85,23 +54,13 @@ class ME:
 
 class MEEP:
     def __call__(self, y_pred, y_true):
-        en = self.entropy_coefficient(y_true, y_pred, EP=True)
-        return en
-
-    def entropy_coefficient(self, y_true, y_pred, EP):
         y_pred_lm = torch.argmax(y_pred, dim=1)
         y_true_lm = torch.argmax(y_true, dim=1)
-        if EP:
-            misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
-            entropy = torch.mean(
-                F.binary_cross_entropy(y_pred, y_pred, reduction="none"),
-                dim=1) * misclassified_pixels
-            entropy = torch.sum(entropy) / torch.sum(misclassified_pixels)
-        else:
-            entropy = torch.mean(
-                F.binary_cross_entropy(y_pred, y_pred, reduction="none"),
-                dim=1)
-            entropy = torch.mean(entropy)
+        misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
+        entropy = torch.mean(
+            F.binary_cross_entropy(y_pred, y_true, reduction="none"),
+            dim=1) * misclassified_pixels
+        entropy = torch.sum(entropy) / torch.sum(misclassified_pixels)
         return entropy
 
 
@@ -158,10 +117,10 @@ def get_criterion(loss):
             return DiceCE()
         case 'focal':
             return monai.losses.FocalLoss()
-        case 'cemeep' | 'crosentropymeep':
-            return CEMEEP()
+        case 'cemeep' | 'crosentropymeep' | 'meep':
+            return MEEP()
         case 'dicemeep':
-            return DiceMEEP()
+            raise NotImplementedError('DiceMEEP not implemented yet')
         case _:
             raise ValueError(f'Unknown loss function: {loss}')
 
