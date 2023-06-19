@@ -28,14 +28,10 @@ mlflow run . -P centers='training:Utrecht' -P loss=focal --env-manager=local
 #### Loss: CE + MEEP
 
 ```
-mlflow run . -P centers='training:Utrecht' -P loss=MEEP --env-manager=local
+mlflow run . -P centers='training:Utrecht' -P loss=MEEP -P meep_start=50 -P meep_lambda=0.3 --env-manager=local
 ```
 
-#### Loss: Dice + MEEP
-
-```
-mlflow run . -P centers='training:Utrecht' loss=DiceMEEP --env-manager=local
-```
+Note that when choosing this loss, the `meep_start` and `meep_lambda` parameters should be set. The `meep_start` parameter indicates the epoch from which the MEEP loss will be used. The `meep_lambda` parameter indicates the weight of the MEEP loss. Check default values in the MLproject file otherwise.
 
 ### Amsterdam
 

@@ -60,7 +60,7 @@ class WMHDataModule(pl.LightningDataModule):
         self.tio_num_workers = tio_num_workers  # TorchIO workers
         self.ids = None
         self.label_name = 'wmh'
-        self.label_probs = {0: 0.5, 1: 0.5}
+        self.label_probs = {0: 0.1, 1: 0.9}
         self.centers_dict = None  # Dictionary with the centers
         self.subjects_train = None  # List of subjects for training
         self.subjects_val = None  # List of subjects for validation

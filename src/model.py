@@ -4,71 +4,22 @@ import os
 import SimpleITK as sitk
 import mlflow
 import monai
-import monai.losses as monai_losses
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 import torchio as tio
+from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import compute_dice as dice
+from torch.nn import CrossEntropyLoss
 
-
-class DiceLoss:
-    def __init__(self, include_background=False, to_onehot_y=True,
-                 softmax=True):
-        self.include_background = include_background
-        self.to_onehot_y = to_onehot_y
-        self.softmax = softmax
-
-    def __call__(self, y_pred, y_true):
-        if self.to_onehot_y:
-            y_true = tio.utils.one_hot(y_true, num_classes=y_pred.shape[1])
-        if self.softmax:
-            y_pred = F.softmax(y_pred, dim=1)
-
-        dice = monai_losses.DiceLoss(include_background=self.include_background,
-                                     reduction="mean")
-        return 1 - dice(y_pred, y_true)
-
-
-
-class ME:
-    def __call__(self, y_pred, y_true):
-        en = self.entropy_coefficient(y_true, y_pred, EP=False)
-        return en
-
-    def entropy_coefficient(self, y_true, y_pred, EP):
-        y_pred_lm = torch.argmax(y_pred, dim=1)
-        y_true_lm = torch.argmax(y_true, dim=1)
-        if EP:
-            misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
-            entropy = torch.mean(
-                F.binary_cross_entropy(y_pred, y_pred, reduction="none"),
-                dim=1) * misclassified_pixels
-            entropy = torch.sum(entropy) / torch.sum(misclassified_pixels)
-        else:
-            entropy = torch.mean(
-                F.binary_cross_entropy(y_pred, y_pred, reduction="none"), dim=1)
-            entropy = torch.mean(entropy)
-        return entropy
-
-
-class MEEP:
-    def __call__(self, y_pred, y_true):
-        y_pred_lm = torch.argmax(y_pred, dim=1)
-        y_true_lm = torch.argmax(y_true, dim=1)
-        misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
-        entropy = torch.mean(
-            F.binary_cross_entropy(y_pred, y_true, reduction="none"),
-            dim=1) * misclassified_pixels
-        entropy = torch.sum(entropy) / torch.sum(misclassified_pixels)
-        return entropy
+from losses import BCEMEEPLoss
 
 
 def compute_metrics(y_hat, y, text=''):
     """ Computes the metrics
 
-    This function computes the metrics that are used to evaluate the model while
-    training.
+    This function computes the metrics that are used to evaluate the model 
+    while training.
 
     :param y_hat: Predicted labels
     :param y: Ground truth labels
@@ -88,41 +39,6 @@ def compute_metrics(y_hat, y, text=''):
     result = {text + 'dice': float(dice_score)}
 
     return result
-
-
-class DiceCE(torch.nn.Module):
-    def __init__(self):
-        """ DiceCE
-
-        This class implements the DiceCE loss function. It is a subclass of the
-        torch.nn.Module class.
-        This is an example for creating combination of losses. It's important
-        to log the loss name and the custom parameters in case of different
-        values.
-        """
-        super().__init__()
-        self.DiceCE = monai.losses.DiceCELoss()
-
-    def forward(self, y_pred, y_true):
-        return self.DiceCE(y_pred, y_true)
-
-
-def get_criterion(loss):
-    match loss.lower():
-        case 'crossentropy' | 'ce':
-            return torch.nn.CrossEntropyLoss()
-        case 'dice':
-            return monai.losses.DiceLoss()
-        case 'dicece' | 'dicecrossentropy':
-            return DiceCE()
-        case 'focal':
-            return monai.losses.FocalLoss()
-        case 'cemeep' | 'crosentropymeep' | 'meep':
-            return MEEP()
-        case 'dicemeep':
-            raise NotImplementedError('DiceMEEP not implemented yet')
-        case _:
-            raise ValueError(f'Unknown loss function: {loss}')
 
 
 class UNet3D(monai.networks.nets.UNet):
@@ -183,17 +99,24 @@ class WMHModel(pl.LightningModule):
     :param loss: Criterion function name to use. See the get_criterion method.
     :param learning_rate: Learning rate
     :param optimizer_class: Optimizer class
+    :param weight_decay: Weight decay
+    :param lambda_lr: LambdaLR coefficient (scheduler)
+    :param reduce_on_epoch: Reduce the learning rate every N epochs.
     """
 
     def __init__(self, net, criterion, learning_rate, optimizer_class,
-                 weight_decay=0, **kwargs):
+                 weight_decay=0, lambda_lr=None, reduce_on_epoch=None,
+                 meep_start=0, meep_lambda=0.3, **kwargs):
         super().__init__()
 
         self.lr = learning_rate
         self.net = net
-        self.criterion = get_criterion(criterion)
+        self.using_meep = False
+        self.criterion = self.get_criterion(criterion, meep_start, meep_lambda)
         self.optimizer_class = optimizer_class
         self.weight_decay = weight_decay
+        self.lambda_lr = lambda_lr
+        self.reduce_on_epoch = reduce_on_epoch
 
         # Test-related parameters
         self.save_preds = kwargs.get('save_predictions', False)
@@ -213,9 +136,33 @@ class WMHModel(pl.LightningModule):
         obj.patch_size = patch_size
         return obj
 
+    def get_criterion(self, loss, meep_start=0, meep_lambda=0.3):
+        match loss.lower():
+            case 'crossentropy' | 'ce':
+                return CrossEntropyLoss()
+            case 'dice':
+                return DiceLoss()
+            case 'dicece' | 'dicecrossentropy':
+                return DiceCELoss()
+            case 'focal':
+                return FocalLoss()
+            case 'cemeep' | 'crosentropymeep' | 'meep':
+                self.using_meep = True
+                return BCEMEEPLoss(meep_start, meep_lambda)
+            case _:
+                raise ValueError(f'Unknown loss function: {loss}')
+
     def configure_optimizers(self):
         optimizer = self.optimizer_class(self.parameters(), lr=self.lr,
                                          weight_decay=self.weight_decay)
+        if self.lambda_lr is not None and self.reduce_on_epoch is not None:
+            scheduler = torch.optim.lr_scheduler.LambdaLR(
+                optimizer,
+                lr_lambda=lambda epoch: self.lambda_lr ** (
+                        epoch // self.reduce_on_epoch),
+                verbose=True
+            )
+            return [optimizer], [scheduler]
         return optimizer
 
     def get_pred_folder(self, t1_path):
@@ -324,8 +271,10 @@ class WMHModel(pl.LightningModule):
         return y_hat, y  # Return the predicted and GT masks
 
     def training_step(self, batch, batch_idx):
+        epoch = self.current_epoch
         y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y)
+        loss = self.criterion(y_hat, y, epoch) if self.using_meep \
+            else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='train_')
 
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
@@ -334,8 +283,10 @@ class WMHModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        epoch = self.current_epoch
         y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y)
+        loss = self.criterion(y_hat, y, epoch) if self.using_meep \
+            else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='val_')
 
         self.log('val_loss', loss, on_step=True, on_epoch=True)
@@ -364,11 +315,14 @@ class WMHModel(pl.LightningModule):
         :param centers: List of centers used for testing
         """
         if preds_info_path is None:
-            preds_info_path = model_path.replace(
-                '.ckpt',
-                f'_preds_{centers.replace(":", "_").replace(",", "_")}.csv')
+            folder_name = '_'.join(
+                os.path.basename(model_path).split('_')[0:-1])
+            file_name = os.path.basename(model_path).replace('.ckpt', '.csv')
+            preds_info_path = os.path.join(os.getcwd(), 'notebooks',
+                                           folder_name, file_name)
 
         preds_info_path = os.path.abspath(os.path.expanduser(preds_info_path))
+        os.makedirs(os.path.dirname(preds_info_path), exist_ok=True)
 
         with open(preds_info_path, 'w', ) as f:
             writer = csv.writer(f)

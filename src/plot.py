@@ -16,6 +16,7 @@ colors = ['#3498db', '#2ecc71', '#e74c3c']  # colors for each center
 centers = ['utrecht', 'singapore', 'amsterdam']
 csv_cols = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh']
 
+
 def get_array_from_nifti(path):
     return sitk.GetArrayFromImage(sitk.ReadImage(path))
 
@@ -40,11 +41,13 @@ def dice_scores(base_center, path_csvs=None):
             # Save results in dictionary
             dc[center]['hard'].append(dice_hard)
 
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 8), sharey=True)
+    plt.rcParams.update({'font.size': 12})
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5, 9), sharey=True)
     for i, center in enumerate(centers):
         sns.boxplot(y=dc[center]['hard'], color=colors[i], ax=axs[i],
                     showmeans=True)
-        axs[i].set_title(f"{center} - Hard")
+        axs[i].set_title(f"{center}")
+        axs[i].set_ylim([0, 1])
 
     fig.suptitle('Dice Scores for WMH Segmentation')
     fig.text(0.5, 0.04, 'Center', ha='center')
@@ -53,9 +56,33 @@ def dice_scores(base_center, path_csvs=None):
     fig.subplots_adjust(top=0.85, wspace=0.05)
 
 
-def entropy(probs, eps=1e-3):
+def entropy(probs, eps=1e-3, apply_mean=True):
     probs = np.clip(probs, eps, 1 - eps)
-    return np.mean(-probs * np.log(probs) - (1 - probs) * np.log(1 - probs))
+    if apply_mean:
+        return np.mean(-probs * np.log(probs) - (1 - probs) * np.log(1 - probs))
+    else:
+        return -probs * np.log(probs) - (1 - probs) * np.log(1 - probs)
+
+
+def get_b_mask_path(subj_path):
+    """ Load brain mask
+
+    Given a subject path, check if the brain mask exists. If it does, return its
+    path. If it doesn't, create it (using FSLs BET) and return its path.
+
+    :param subj_path: Path to subject folder
+    :return: Brain mask path
+    """
+    b_mask_path = os.path.join(subj_path, 'pre', 'T1_brain_mask.nii.gz')
+    if os.path.exists(b_mask_path):
+        return b_mask_path
+    else:
+        t1_path = os.path.join(subj_path, 'pre', 'T1.nii.gz')
+        b_t1b_path = os.path.join(subj_path, 'pre', 'T1_brain.nii.gz')
+        cmd = f"bet {t1_path} {b_t1b_path} -m"
+        os.system(cmd)
+        print(f"Created brain mask for {subj_path}")
+        return b_mask_path
 
 
 def entropy_segment(base_center, path_csvs=None):
@@ -69,26 +96,33 @@ def entropy_segment(base_center, path_csvs=None):
 
         for _, row in df.iterrows():
             pred_softmax_path, gt_path = row[1], row[3]
-            subj = os.path.basename(os.path.dirname(row[1]))
-            ent[center][subj] = {'pred': [], 'gt': []}
+            subj_path = os.path.dirname(pred_softmax_path)
+            subj = os.path.basename(subj_path)
+            ent[center][subj] = {'pred': [], 'gt': [], 'bMask': []}
 
             pred_softmax = nib.load(pred_softmax_path).get_fdata()
             gt = nib.load(gt_path).get_fdata()
+            b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
 
             pos_class = pred_softmax[:, :, :, 1].flatten()
             gt_class = gt.flatten()
+            b_mask = b_mask.flatten()
 
             thres_pos = np.where(pos_class >= 0.5)[0]
-            thres_gt = np.where(gt_class == 1)[0]
+            thres_gt_1 = np.where(gt_class == 1)[0]
+            thres_brain = np.where(b_mask == 1)[0]
 
             filt_softmax = pos_class[thres_pos]
-            filt_gt = pos_class[thres_gt]
+            filt_gt_1 = pos_class[thres_gt_1]
+            filt_brain = pos_class[thres_brain]
 
             entropy_pred = entropy(filt_softmax)
-            entropy_gt = entropy(filt_gt)
+            entropy_gt_1 = entropy(filt_gt_1)
+            entropy_brain = entropy(filt_brain)
 
             ent[center][subj]['pred'].append(entropy_pred)
-            ent[center][subj]['gt'].append(entropy_gt)
+            ent[center][subj]['gt'].append(entropy_gt_1)
+            ent[center][subj]['bMask'].append(entropy_brain)
 
     # Print the entropy for each center and individual
     for center in centers:
@@ -101,13 +135,74 @@ def entropy_segment(base_center, path_csvs=None):
         values = list(ent[center].values())
         values_pred = [x['pred'][0] for x in values]
         values_gt = [x['gt'][0] for x in values]
+        values_bMask = [x['bMask'][0] for x in values]
 
         # Plot the boxplots for softmax predicted entropy
         axs[i].boxplot(values_pred, positions=[0], widths=0.6)
         axs[i].boxplot(values_gt, positions=[1], widths=0.6)
+        axs[i].boxplot(values_bMask, positions=[2], widths=0.6)
 
-        axs[i].set_xticklabels(['Softmax > 0.5', 'Softmax in GT==1'])
+        axs[i].set_xticklabels(['Softmax > 0.5', 'Softmax in GT==1',
+                                'Softmax in brain mask'])
         axs[i].set_title(f"{center}")
+
+
+def entropy_segment_per_center(base_center, path_csvs=None):
+    os.chdir(path_csvs) if path_csvs else None
+    segment_types = ['pred', 'gt', 'bMask']
+    ent = {center_type: {} for center_type in segment_types}
+
+    for center in centers:
+        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
+        df.columns = csv_cols
+
+        for segment_type in segment_types:
+            ent[segment_type][center] = {}
+
+        for _, row in df.iterrows():
+            pred_softmax_path, gt_path = row[1], row[3]
+            subj_path = os.path.dirname(pred_softmax_path)
+            subj = os.path.basename(subj_path)
+
+            pred_softmax = nib.load(pred_softmax_path).get_fdata()
+            gt = nib.load(gt_path).get_fdata()
+            b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
+
+            pos_class = pred_softmax[:, :, :, 1].flatten()
+            gt_class = gt.flatten()
+            b_mask = b_mask.flatten()
+
+            thres_pos = np.where(pos_class >= 0.5)[0]
+            thres_gt_1 = np.where(gt_class == 1)[0]
+            thres_brain = np.where(b_mask == 1)[0]
+
+            filt_softmax = pos_class[thres_pos]
+            filt_gt_1 = pos_class[thres_gt_1]
+            filt_brain = pos_class[thres_brain]
+
+            entropy_pred = entropy(filt_softmax)
+            entropy_gt_1 = entropy(filt_gt_1)
+            entropy_brain = entropy(filt_brain)
+
+            ent['pred'][center][subj] = entropy_pred
+            ent['gt'][center][subj] = entropy_gt_1
+            ent['bMask'][center][subj] = entropy_brain
+
+    # Print the entropy for each center and individual
+    for segment_type in segment_types:
+        print(f"Segment type: {segment_type}")
+        for key, value in ent[segment_type].items():
+            print(f"{key}: {value}")
+
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 8))
+    for i, segment_type in enumerate(segment_types):
+        for j, center in enumerate(centers):
+            values = list(ent[segment_type][center].values())
+            axs[i].boxplot(values, positions=[j], widths=0.6)
+        axs[i].set_xticklabels(centers)
+        axs[i].set_title(f"{segment_type}")
+
+    plt.show()
 
 
 def append_round(imgs, img, decimals=2):
@@ -330,18 +425,24 @@ def dice_vs_entropy(base_center, path_csvs=None):
 
         for i, row in df.iterrows():
             pred_hard_path, pred_softmax_path, _, gt_path = row
+            subj_path = os.path.dirname(pred_softmax_path)
 
             pred_hard = nib.load(pred_hard_path).get_fdata()
             gt = nib.load(gt_path).get_fdata()
+            b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
+            b_mask = b_mask.flatten()
 
             # Compute dice scores
             dice_hard = dice_score(pred_hard, gt)
 
+            # Filtrar por GT == 1
+
             # Compute entropy
             pred_softmax = nib.load(pred_softmax_path).get_fdata()
             pos_class = pred_softmax[:, :, :, 1].flatten()
-            thres_pos = np.where(pos_class >= 0.5)[0]
-            filt_softmax = pos_class[thres_pos]
+            # thres_pos = np.where(pos_class >= 0.5)[0]
+            thres_brain = np.where(b_mask == 1)[0]
+            filt_softmax = pos_class[thres_brain]
 
             ent = entropy(filt_softmax)
 
@@ -355,8 +456,103 @@ def dice_vs_entropy(base_center, path_csvs=None):
     plt.xlabel("Entropy")
     plt.ylabel("Dice score")
 
-    plt.xlim([0, 0.2 + np.max(dice_ent[center][:, 1])])
+    # plt.xlim([0, 0.2 + np.max(dice_ent[center][:, 1])])
     plt.ylim([0, 1])
 
     plt.legend()
     plt.show()
+
+
+def uncertainty_by_condition(base_center, path_csvs=None):
+    """ Uncertainty by condition
+
+    Plots inspired in: uncertainty_by_condition from https://github.com/SteffenCzolbe/probabilistic_segmentation  # noqa
+    This will plot the TP, FP, TN, FN uncertainty for each center
+
+    :param base_center: Base center
+    :return:
+    """
+    os.chdir(path_csvs) if path_csvs else None
+    unc_cond = {}
+    for center in centers:
+        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
+        df.columns = csv_cols
+
+        unc_cond[center] = {
+            "TP": np.array([]),
+            "FP": np.array([]),
+            "TN": np.array([]),
+            "FN": np.array([])
+        }
+
+        for i, row in df.iterrows():
+            pred_hard_path, pred_softmax_path, _, gt_path = row
+
+        subj_path = os.path.dirname(pred_softmax_path)
+
+        pred_softmax = nib.load(pred_softmax_path).get_fdata()
+        gt = nib.load(gt_path).get_fdata()
+        b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
+
+        gt_one_hot = np.eye(2, dtype=np.uint8)[gt.astype(int)]
+
+        neg_sftmx = pred_softmax[:, :, :, 0].flatten()
+        pos_sftmx = pred_softmax[:, :, :, 1].flatten()
+        neg_gt = gt_one_hot[:, :, :, 0].flatten()
+        pos_gt = gt_one_hot[:, :, :, 1].flatten()
+
+        b_mask = b_mask.flatten()
+
+        # Brain mask
+        thres_brain = np.where(b_mask == 1)[0]
+        pos_brain = pos_sftmx[thres_brain]
+        neg_brain = neg_sftmx[thres_brain]
+        pos_gt_brain = pos_gt[thres_brain]  # Not necessary but just in case
+        neg_gt_brain = neg_gt[thres_brain]
+
+        # TP
+        tp = np.where((pos_brain >= 0.5) & (pos_gt_brain == 1))[0]
+        tp_unc = entropy(pos_brain[tp], apply_mean=False)
+        unc_cond[center]["TP"] = np.append(unc_cond[center]["TP"], tp_unc)
+
+        # FP
+        fp = np.where((pos_brain >= 0.5) & (pos_gt_brain == 0))[0]
+        fp_unc = entropy(pos_brain[fp], apply_mean=False)
+        unc_cond[center]["FP"] = np.append(unc_cond[center]["FP"], fp_unc)
+
+        # TN
+        tn = np.where((neg_brain >= 0.5) & (neg_gt_brain == 1))[0]
+        tn_unc = entropy(neg_brain[tn], apply_mean=False)
+        unc_cond[center]["TN"] = np.append(unc_cond[center]["TN"], tn_unc)
+
+        # FN
+        fn = np.where((neg_brain >= 0.5) & (neg_gt_brain == 0))[0]
+        fn_unc = entropy(neg_brain[fn], apply_mean=False)
+        unc_cond[center]["FN"] = np.append(unc_cond[center]["FN"], fn_unc)
+
+    # Plot Stripplot
+    fig, ax = plt.subplots(len(centers), 1, figsize=(4, 10))
+    categories = ['TP', 'FP', 'TN', 'FN']
+    for i, center in enumerate(centers):
+        sns.stripplot(data=unc_cond[center], ax=ax[i], jitter=True, alpha=0.03)
+        ax[i].set_title(center)
+        ax[i].set_ylabel("Entropy")
+        ax[i].set_xticks([0, 1, 2, 3])
+        ax[i].set_xticklabels(categories)
+
+        # Calculate mean and median for each category
+        mean_values = [np.mean(unc_cond[center][category]) for category in categories]
+        median_values = [np.median(unc_cond[center][category]) for category in categories]
+
+        # Add mean and median markers for each category
+        for j, category in enumerate(categories):
+            ax[i].plot(j, mean_values[j], marker='o', color='red', label='Mean' if j == 0 else '', zorder=10)
+            ax[i].plot(j, median_values[j], marker='o', color='blue', label='Median' if j == 0 else '', zorder=10)
+
+        # Add legend
+        ax[i].legend()
+
+
+    plt.show()
+
+

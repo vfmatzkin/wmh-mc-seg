@@ -64,9 +64,18 @@ def print_auto_logged_info(r):
               help='Custom name for the run')
 @click.option('--resume-from', required=False, type=click.STRING,
               help='Resume from checkpoint')
+@click.option('--lambda-lr', required=False, type=click.FLOAT,
+              help='LambdaLR Scheduler')
+@click.option('--reduce-on-epoch', required=False, type=click.INT,
+              help='When to reduce LR (scheduler)')
+@click.option('--meep-start', required=False, type=click.INT,
+              help='When to start applying MEEP (if selected in --loss)')
+@click.option('--meep-lambda', required=False, type=click.FLOAT,
+              help='Lambda for MEEP (if selected in --loss)')
 def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
           loss, weight_decay, seed, patch_size, samples_per_volume,
-          queue_length, tio_num_workers, custom_name, resume_from):
+          queue_length, tio_num_workers, custom_name, resume_from, lambda_lr,
+          reduce_on_epoch, meep_start, meep_lambda):
     split_ratios = ast.literal_eval(split_ratios)
     patch_size = None if patch_size == -1 else patch_size
     resume_from = None if resume_from == 'None' else resume_from
@@ -87,6 +96,10 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         'tio_num_workers': tio_num_workers,
         'custom_name': custom_name,
         'resume_from': resume_from,
+        'lambda_lr': lambda_lr,
+        'reduce_on_epoch': reduce_on_epoch,
+        'meep_start': meep_start,
+        'meep_lambda': meep_lambda,
     }
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
@@ -125,6 +138,10 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             learning_rate=lr,
             optimizer_class=torch.optim.AdamW,
             weight_decay=weight_decay,
+            lambda_lr=lambda_lr,
+            reduce_on_epoch=reduce_on_epoch,
+            meep_start=meep_start,
+            meep_lambda=meep_lambda,
         )
 
         start = datetime.now()
@@ -172,11 +189,7 @@ if __name__ == "__main__":
                     key = arg
                     value = sys.argv[sys.argv.index(arg) + 1]
                 key = key.replace('--', '').replace('-', '_')
-                if key in params:
-                    params[key]['default'] = value
-                else:
-                    print(f'Unknown parameter {key}.')
-                    sys.exit(1)
+                params[key] = {'default': value}
         sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}="
                                     f"{v['default']}" for k, v in params.items()]
 

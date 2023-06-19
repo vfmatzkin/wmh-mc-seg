@@ -1,3 +1,6 @@
 .idea
 mlruns
 scratches
+checkpoints
+lightning_logs
+notebooks/**/*.csv
