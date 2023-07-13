@@ -117,6 +117,7 @@ class WMHModel(pl.LightningModule):
         self.weight_decay = weight_decay
         self.lambda_lr = lambda_lr
         self.reduce_on_epoch = reduce_on_epoch
+        self.start_val_log_epoch = meep_start  # start logging validation loss
 
         # Test-related parameters
         self.save_preds = kwargs.get('save_predictions', False)
@@ -290,6 +291,10 @@ class WMHModel(pl.LightningModule):
         metrics = compute_metrics(y_hat, y, text='val_')
 
         self.log('val_loss', loss, on_step=True, on_epoch=True)
+
+        loss_after_n = torch.inf if epoch < self.start_val_log_epoch else loss
+        self.log('val_loss_after_n', loss_after_n, on_epoch=True)
+
         self.log_dict(metrics, on_step=True, on_epoch=True)
 
         return loss

@@ -122,11 +122,22 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             save_top_k=3,
             mode='min',
         )
+        chk_callbacks = [top3_chk]
+
+        if meep_start and meep_start > 0:
+            top3_after_n = pl.callbacks.ModelCheckpoint(
+                monitor='val_loss_after_n',
+                dirpath=os.path.join('checkpoints', run_name),
+                filename="meep-{epoch:02d}-{val_loss_after_n:.4f}",
+                save_top_k=3,
+                mode='min',
+            )
+            chk_callbacks = [top3_chk, top3_after_n]
 
         trainer = pl.Trainer(
             accelerator='auto',
             max_epochs=epochs,
-            callbacks=[top3_chk],
+            callbacks=chk_callbacks,
             devices='auto',
         )
 
