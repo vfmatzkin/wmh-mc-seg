@@ -106,14 +106,23 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
                                patch_size, seed, tio_num_workers,
                                samples_per_volume, queue_length)
 
-    run_name = custom_name if custom_name \
-        else centers.replace(':', '_').replace(',', '_')
-    run_name += f'_{loss}'
-    run_name += f'_{random.randint(1000, 9999)}'
+    run_name = centers.replace(':', '_').replace(',', '_')
+    run_name += f'_{loss}_{random.randint(1000, 9999)}'
+    run_name = custom_name if custom_name else run_name
+
+    params['run_name'] = run_name
 
     with mlflow.start_run(run_name=run_name) as run:
         if len(run.data.params) == 0:
             mlflow.log_params(params)
+
+        top1_chk = pl.callbacks.ModelCheckpoint(
+            monitor='val_loss',
+            dirpath='checkpoints',
+            filename=f'{run_name}_best',
+            save_top_k=1,
+            mode='min',
+        )
 
         top3_chk = pl.callbacks.ModelCheckpoint(
             monitor='val_loss',
@@ -137,7 +146,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         trainer = pl.Trainer(
             accelerator='auto',
             max_epochs=epochs,
-            callbacks=chk_callbacks,
+            callbacks=[top1_chk, top3_chk],
             devices='auto',
         )
 
@@ -151,8 +160,8 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             weight_decay=weight_decay,
             lambda_lr=lambda_lr,
             reduce_on_epoch=reduce_on_epoch,
-            meep_start=meep_start,
-            meep_lambda=meep_lambda,
+            reg_start=meep_start,
+            reg_lambda=meep_lambda,
         )
 
         start = datetime.now()
@@ -201,7 +210,7 @@ if __name__ == "__main__":
                     value = sys.argv[sys.argv.index(arg) + 1]
                 key = key.replace('--', '').replace('-', '_')
                 params[key] = {'default': value}
-        sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}="
-                                    f"{v['default']}" for k, v in params.items()]
+        sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}={v['default']}"
+                                    for k, v in params.items()]
 
     train()

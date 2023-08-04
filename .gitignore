@@ -4,3 +4,4 @@ scratches
 checkpoints
 lightning_logs
 notebooks/**/*.csv
+.trash

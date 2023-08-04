@@ -4,11 +4,30 @@ WMH MRI Segmentation
 The data should be already downloaded and extracted in the `data_root` folder. 
 For more info on the data, see the [data README](https://www.notion.so/matzkin/2-WMH-Data-download-bf662e9460c444459e3934d3099d9285).
 
-The hyperparameters are set in the MLproject file. The hyperparameters are:
+The default hyperparameters are set in the MLproject file.
+
+[//]: # (## Quickstart)
+
+[//]: # (### Get predictions from pretrained models)
+
+[//]: # (#### White Matter Intensity segmentation masks)
+
+[//]: # (#### Uncertainty estimates)
+
+[//]: # (##### Using entropy)
+
+[//]: # (##### Using MC dropout)
+
 
 ## Training
 
-Note that `mlflow run` is called with `--env-manager=local` to avoid reinstalling the environment each time. The dependencies can be automatically installed omitting this parameter.
+### Some considerations
+- Note that `mlflow run` is called with `--env-manager=local` to prevent the download/installation of the environment each time. The dependencies can be automatically installed omitting this parameter.
+- The models can be trained both using the mlflow CLI or calling the src/train.py script. The only difference is that for the CLI, the run name (for mlflow tracking) is set automatically by mlflow, while for the script, it's set according to the centers used for train and the loss function used.
+
+  This is why you could set the --run-name parameter in the CLI with a custom name.
+  
+  For both alternatives, the parameters will be taken from the MLProject file first, and the ones passed as arguments will set/override them.
 
 ### Utrecht
 For training with utrecht data, run:
@@ -16,7 +35,7 @@ For training with utrecht data, run:
 #### Loss: DiceCE
 
 ```
-mlflow run . -P centers='training:Utrecht' --env-manager=local
+mlflow run . -P centers='training:Utrecht' --env-manager=local --run-name=training_Utrecht_DiceCE
 ```
 
 #### Loss: Focal
@@ -49,6 +68,10 @@ mlflow run . -P centers='training:Singapore' --env-manager=local
 ```
 
 ## Predict
+
+### Some considerations
+
+- If you're using Monte Carlo dropout estimation (setting the options `--mc-ratio` and `--mc-samples`), `--mc-ratio` should be lower than the `dropout` option used for training.
 
 ### Utrecht
 
