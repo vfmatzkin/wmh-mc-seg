@@ -17,7 +17,7 @@ print('Last run on', time.ctime())
 @click.option('--data-root', type=click.STRING, required=True,
               help="Root data folder")
 @click.option('--centers', type=click.STRING, required=True,
-              help="Centers used for training (e.g.: training:Utretch)")
+              help="Centers used for training (e.g.: training:Utrecht)")
 @click.option('--split-ratios', type=click.STRING, required=True,
               help="Ratios for training/validation/test splits")
 @click.option('--model-path', type=click.STRING, required=True,
@@ -35,19 +35,22 @@ print('Last run on', time.ctime())
                                  'images if output-dir is not provided')
 @click.option('--csv-preds', type=click.STRING, default=None,
               help='CSV file to save the predictions paths')
+@click.option('--mc-ratio', type=click.FLOAT, default=0.0,
+                help='Dropout ratio for Monte Carlo Dropout. Note that it has to'
+                     ' be lower than the dropout used for training.')
+@click.option('--mc-samples', type=click.INT, default=0,
+                help='Number of Monte Carlo Dropout samples')
 def predict(data_root, centers, split_ratios, model_path, batch_size,
-            patch_size, seed, output_dir, save_predictions, csv_preds):
+            patch_size, seed, output_dir, save_predictions, csv_preds,
+            mc_ratio, mc_samples):
     split_ratios = ast.literal_eval(split_ratios)
     patch_size = None if patch_size == -1 else patch_size
-    if patch_size is not None:
-        print(f'Provided patch size: {patch_size}. Patch-size inference is not '
-              f'supported yet. Inference will be performed on the whole image.')
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
                                seed=seed)
 
     model = WMHModel.load_test(model_path, save_predictions, output_dir,
-                               patch_size)
+                               patch_size, mc_ratio, mc_samples)
 
     trainer = pl.Trainer()
     trainer.test(model, dataloader)
@@ -78,11 +81,7 @@ if __name__ == '__main__':
                     key = arg
                     value = sys.argv[sys.argv.index(arg) + 1]
                 key = key.replace('--', '').replace('-', '_')
-                if key in params:
-                    params[key]['default'] = value
-                else:
-                    print(f'Unknown parameter {key}.')
-                    sys.exit(1)
+                params[key] = {'default': value}
         sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}="
                                     f"{v['default']}" for k, v in
                                     params.items()]

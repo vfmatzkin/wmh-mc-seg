@@ -12,7 +12,7 @@ from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import compute_dice as dice
 from torch.nn import CrossEntropyLoss
 
-from losses import BCEMEEPLoss
+from losses import BCEMEEPLoss, BCEKLLoss
 
 
 def compute_metrics(y_hat, y, text=''):
@@ -106,13 +106,13 @@ class WMHModel(pl.LightningModule):
 
     def __init__(self, net, criterion, learning_rate, optimizer_class,
                  weight_decay=0, lambda_lr=None, reduce_on_epoch=None,
-                 meep_start=0, meep_lambda=0.3, **kwargs):
+                 reg_start=0, reg_lambda=0.3, **kwargs):
         super().__init__()
 
         self.lr = learning_rate
         self.net = net
         self.using_meep = False
-        self.criterion = self.get_criterion(criterion, meep_start, meep_lambda)
+        self.criterion = self.get_criterion(criterion, reg_start, reg_lambda)
         self.optimizer_class = optimizer_class
         self.weight_decay = weight_decay
         self.lambda_lr = lambda_lr
@@ -123,20 +123,27 @@ class WMHModel(pl.LightningModule):
         self.output_dir = kwargs.get('output_dir', None)
         self.saved_preds = []
         self.patch_size = kwargs.get('patch_size', None)
+        self.mc_dropout_ratio = kwargs.get('mc_dropout_ratio', 0.0)
+        self.mc_dropout_samples = kwargs.get('mc_dropout_samples', 0)
 
         self.save_hyperparameters(ignore=['net'])
 
     @classmethod
-    def load_test(cls, model_path, save_predictions, output_dir, patch_size):
+    def load_test(cls, model_path, save_predictions, output_dir, patch_size,
+                  mc_dropout_ratio, mc_dropout_samples):
         model_path = os.path.expanduser(model_path)
-        obj = WMHModel.load_from_checkpoint(model_path, net=UNet3D())
+        obj = WMHModel.load_from_checkpoint(model_path,
+                                            net=UNet3D(mc_dropout_ratio))
         obj.model_path = os.path.abspath(model_path)
         obj.save_preds = save_predictions
         obj.output_dir = output_dir
         obj.patch_size = patch_size
+        obj.mc_dropout_ratio = mc_dropout_ratio
+        obj.mc_dropout_samples = mc_dropout_samples
+
         return obj
 
-    def get_criterion(self, loss, meep_start=0, meep_lambda=0.3):
+    def get_criterion(self, loss, meep_start=0, reg_lambda=0.3):
         match loss.lower():
             case 'crossentropy' | 'ce':
                 return CrossEntropyLoss()
@@ -148,7 +155,10 @@ class WMHModel(pl.LightningModule):
                 return FocalLoss()
             case 'cemeep' | 'crosentropymeep' | 'meep':
                 self.using_meep = True
-                return BCEMEEPLoss(meep_start, meep_lambda)
+                return BCEMEEPLoss(meep_start, reg_lambda)
+            case 'cekl' | 'crosentropykl' | 'kl':
+                self.using_meep = True
+                return BCEKLLoss(meep_start, reg_lambda)
             case _:
                 raise ValueError(f'Unknown loss function: {loss}')
 
@@ -175,7 +185,8 @@ class WMHModel(pl.LightningModule):
         os.makedirs(pred_folder, exist_ok=True)
         return pred_folder
 
-    def save_preds_tst(self, y_hat, y, logits, reference_imgs, is_test=False):
+    def save_preds_tst(self, y_hat, y, logits, reference_imgs, is_test=False,
+                       lgs_mc_arr=None, sm_mc_arr=None):
         """ Saves predictions to the disk
 
         It expects full volume images, not patches.
@@ -185,6 +196,8 @@ class WMHModel(pl.LightningModule):
         :param logits: Logits
         :param reference_imgs: Paths to the T1 images
         :param is_test: Whether the model is being tested or not
+        :param lgs_mc_arr: Logits array (for MC dropout)
+        :param sm_mc_arr: Softmax output array (for MC dropout)
         """
         if not is_test or (not self.save_preds and self.output_dir is None):
             return None
@@ -193,6 +206,17 @@ class WMHModel(pl.LightningModule):
             pred_folder = self.get_pred_folder(t1_path)
             hard_pred = torch.argmax(y_hat[i], dim=0).to(torch.uint8)
 
+            lgs_mc_mean = lgs_mc_arr.mean(0) if lgs_mc_arr is not None else None
+            sftmx_mc_mean = sm_mc_arr.mean(0) if sm_mc_arr is not None else None
+            hard_pred_mc, uncert_mc = None, None
+            if sm_mc_arr is not None:
+                hard_pred_mc = torch.argmax(sftmx_mc_mean[0], 0).to(torch.uint8)
+                if self.mc_dropout_samples == 1:
+                    print('WARNING: MC dropout samples == 1, uncertainty '
+                          'estimation won\'t be computed')
+                uncert_mc = sm_mc_arr.std(0)[0] if self.mc_dropout_samples > 1 \
+                    else None  # First elem in batch + foreground ch on save
+
             run_id = os.path.splitext(os.path.basename(self.model_path))[0]
             imgs = {
                 f'pred_wmh_hard_{run_id}.nii.gz': hard_pred,
@@ -200,6 +224,10 @@ class WMHModel(pl.LightningModule):
                 f'pred_logits_{run_id}.nii.gz': logits[i],
                 f'gt_wmh_{run_id}.nii.gz':
                     y[i, 1].to(torch.uint8) if y is not None else None,
+                f'pred_mc_logitsmean_{run_id}.nii.gz': lgs_mc_mean[0],
+                f'pred_mc_softmaxmean_{run_id}.nii.gz': sftmx_mc_mean[0],
+                f'pred_mc_hardmean_{run_id}.nii.gz': hard_pred_mc,
+                f'pred_mc_uncertmc_{run_id}.nii.gz': uncert_mc[1],
             }
 
             paths = []
@@ -215,43 +243,47 @@ class WMHModel(pl.LightningModule):
         if not is_test or self.patch_size is None:
             return self.net(x)
         else:
-            out_tensor = torch.empty((0, x.shape[1], x.shape[2], x.shape[3],
-                                      x.shape[4]))
-            for i_subj in range(x.shape[0]):
-                if 'wmh' in batch:
-                    subject = tio.Subject(
-                        t1=tio.ScalarImage(tensor=batch['t1']['data'][i_subj]),
-                        flair=tio.ScalarImage(
-                            tensor=batch['flair']['data'][i_subj]
-                        ),
-                        wmh=tio.LabelMap(tensor=batch['wmh']['data'][i_subj]))
-                grid_sampler = tio.inference.GridSampler(
-                    subject,
-                    self.patch_size,
-                    4,
-                )
-                patch_loader = torch.utils.data.DataLoader(
-                    grid_sampler,
-                    batch_size=1,
-                )
-                aggregator = tio.inference.GridAggregator(grid_sampler)
-                with torch.no_grad():
-                    for patches_batch in patch_loader:
-                        xc1 = patches_batch['t1'][tio.DATA]
-                        xc2 = patches_batch['flair'][tio.DATA]
+            return self.patch_inference(x, batch)
 
-                        # Concatenate the input images along the channel dimension
-                        x = torch.cat((xc1, xc2), dim=1)
+    def patch_inference(self, x, batch):
+        out_tensor = torch.empty((0, x.shape[1], x.shape[2], x.shape[3],
+                                  x.shape[4]))
+        for i_subj in range(x.shape[0]):
+            if 'wmh' in batch:
+                subject = tio.Subject(
+                    t1=tio.ScalarImage(tensor=batch['t1']['data'][i_subj]),
+                    flair=tio.ScalarImage(
+                        tensor=batch['flair']['data'][i_subj]
+                    ),
+                    wmh=tio.LabelMap(tensor=batch['wmh']['data'][i_subj]))
+            grid_sampler = tio.inference.GridSampler(
+                subject,
+                self.patch_size,
+                4,
+            )
+            patch_loader = torch.utils.data.DataLoader(
+                grid_sampler,
+                batch_size=1,
+            )
+            aggregator = tio.inference.GridAggregator(grid_sampler)
+            with torch.no_grad():
+                for patches_batch in patch_loader:
+                    xc1 = patches_batch['t1'][tio.DATA]
+                    xc2 = patches_batch['flair'][tio.DATA]
 
-                        locations = patches_batch[tio.LOCATION]
-                        logits = self.net(x)
-                        aggregator.add_batch(logits, locations)
-                output_tensor = aggregator.get_output_tensor()
-                # Append it to the out_tensor in the first channel (batch)
-                # out_tensor is a 5D tensor (batch, channels, x, y, z)
-                # and output_tensor is a 4D tensor (channels, x, y, z)
-                out_tensor = torch.cat((out_tensor, output_tensor.unsqueeze(0)))
-            return out_tensor
+                    # Concatenate the input images along the channel dimension
+                    x = torch.cat((xc1, xc2), dim=1)
+
+                    locations = patches_batch[tio.LOCATION]
+
+                    logits = self.net(x)
+                    aggregator.add_batch(logits, locations)
+            output_tensor = aggregator.get_output_tensor()
+            # Append it to the out_tensor in the first channel (batch)
+            # out_tensor is a 5D tensor (batch, channels, x, y, z)
+            # and output_tensor is a 4D tensor (channels, x, y, z)
+            out_tensor = torch.cat((out_tensor, output_tensor.unsqueeze(0)))
+        return out_tensor
 
     def infer_batch(self, batch, is_test=False):
         xc1 = batch['t1'][tio.DATA]
@@ -262,20 +294,61 @@ class WMHModel(pl.LightningModule):
         # Concatenate the input images along the channel dimension
         x = torch.cat((xc1, xc2), dim=1)
 
-        # Forward pass through the neural network
+        # Get MC dropout predictions if it applies (logits and softmax)
+        lgs_mc_arr, sm_mc_arr = self.get_mc_preds(x, batch, is_test)
+
+        # Forward pass
         logits = self.forward_pass(x, batch, is_test)
         y_hat = F.softmax(logits, dim=1)
 
-        self.save_preds_tst(y_hat, y, logits, t1_paths, is_test)
+        # Save predictions if it applies
+        self.save_preds_tst(y_hat, y, logits, t1_paths, is_test, lgs_mc_arr,
+                            sm_mc_arr)
+        return y_hat, y  # Return the predicted and GT masks (for train)
 
-        return y_hat, y  # Return the predicted and GT masks
+    def get_mc_preds(self, x, batch, is_test):
+        # For MC dropout:
+        mc_cond = self.mc_dropout_ratio > 0 and is_test
+        if mc_cond:
+            model_was_eval = not self.net.training
+            self.net.train()
+
+        # If no MC dropout -> return empty arrays
+        mc_fwd_passes = self.mc_dropout_samples if mc_cond else 0
+        logits_arr = torch.empty((mc_fwd_passes, x.shape[0], 2, x.shape[2],
+                                  x.shape[3], x.shape[4]))
+        y_hat_arr = torch.empty((mc_fwd_passes, x.shape[0], 2, x.shape[2],
+                                 x.shape[3], x.shape[4]))
+
+        # MC forward passes
+        for i in range(mc_fwd_passes):
+            print(f'  - MC dropout: forward pass {i + 1}/{mc_fwd_passes}')
+            logits_mc = self.forward_pass(x, batch, is_test)
+            y_hat_mc = F.softmax(logits_mc, dim=1)
+            logits_arr[i] = logits_mc
+            y_hat_arr[i] = y_hat_mc
+
+        # Restore the model to its original state
+        if mc_cond and model_was_eval:
+            self.net.eval()
+
+        return logits_arr, y_hat_arr
 
     def training_step(self, batch, batch_idx):
         epoch = self.current_epoch
         y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y, epoch) if self.using_meep \
+        losses = self.criterion(y_hat, y, epoch) if self.using_meep \
             else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='train_')
+
+        loss = 0
+        if type(losses) == dict:
+            for key in losses:
+                self.log(f'train_{key}', losses[key], prog_bar=True,
+                         on_step=True, on_epoch=True)
+                loss += losses[key]
+        else:
+            loss = losses
 
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log_dict(metrics, on_step=True, on_epoch=True)
@@ -285,9 +358,18 @@ class WMHModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         epoch = self.current_epoch
         y_hat, y = self.infer_batch(batch)
-        loss = self.criterion(y_hat, y, epoch) if self.using_meep \
+        losses = self.criterion(y_hat, y, epoch) if self.using_meep \
             else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='val_')
+
+        loss = 0
+        if type(losses) == dict:
+            for key in losses:
+                self.log(f'val_{key}', losses[key], prog_bar=True, on_step=True,
+                         on_epoch=True)
+                loss += losses[key]
+        else:
+            loss = losses
 
         self.log('val_loss', loss, on_step=True, on_epoch=True)
         self.log_dict(metrics, on_step=True, on_epoch=True)
