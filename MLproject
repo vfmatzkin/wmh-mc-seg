@@ -19,7 +19,7 @@ entry_points:
       samples_per_volume: {type: int, default: 20}
       queue_length: {type: int, default: 500}
       tio_num_workers: {type: int, default: 8}
-      meep_start: {type: int, default: 0}
+      reg_start: {type: int, default: 0}
       meep_lambda: {type: float, default: 0.3}
     command: "python src/train.py \
         --data-root {data_root} \
@@ -35,7 +35,9 @@ entry_points:
         --patch-size {patch_size} \
         --samples-per-volume {samples_per_volume} \
         --queue-length {queue_length} \
-        --tio-num-workers {tio_num_workers}"
+        --tio-num-workers {tio_num_workers} \
+        --reg-start {reg_start} \
+        --meep-lambda {meep_lambda}"
   test:
     parameters:
       data_root: {type: string, default: "~/Code/datasets/wmh"}
