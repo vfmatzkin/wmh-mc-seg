@@ -35,9 +35,7 @@ entry_points:
         --patch-size {patch_size} \
         --samples-per-volume {samples_per_volume} \
         --queue-length {queue_length} \
-        --tio-num-workers {tio_num_workers} \
-        --meep-start {meep_start} \
-        --meep-lambda {meep_lambda}"
+        --tio-num-workers {tio_num_workers}"
   test:
     parameters:
       data_root: {type: string, default: "~/Code/datasets/wmh"}
