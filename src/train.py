@@ -68,14 +68,14 @@ def print_auto_logged_info(r):
               help='LambdaLR Scheduler')
 @click.option('--reduce-on-epoch', required=False, type=click.INT,
               help='When to reduce LR (scheduler)')
-@click.option('--meep-start', required=False, type=click.INT,
-              help='When to start applying MEEP (if selected in --loss)')
+@click.option('--reg-start', required=False, type=click.INT,
+                help='When to start regularization')
 @click.option('--meep-lambda', required=False, type=click.FLOAT,
               help='Lambda for MEEP (if selected in --loss)')
 def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
           loss, weight_decay, seed, patch_size, samples_per_volume,
           queue_length, tio_num_workers, custom_name, resume_from, lambda_lr,
-          reduce_on_epoch, meep_start, meep_lambda):
+          reduce_on_epoch, reg_start, meep_lambda):
     split_ratios = ast.literal_eval(split_ratios)
     patch_size = None if patch_size == -1 else patch_size
     resume_from = None if resume_from == 'None' else resume_from
@@ -98,7 +98,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         'resume_from': resume_from,
         'lambda_lr': lambda_lr,
         'reduce_on_epoch': reduce_on_epoch,
-        'meep_start': meep_start,
+        'reg_start': reg_start,
         'meep_lambda': meep_lambda,
     }
 
@@ -131,17 +131,6 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             save_top_k=3,
             mode='min',
         )
-        chk_callbacks = [top3_chk]
-
-        if meep_start and meep_start > 0:
-            top3_after_n = pl.callbacks.ModelCheckpoint(
-                monitor='val_loss_after_n',
-                dirpath=os.path.join('checkpoints', run_name),
-                filename="meep-{epoch:02d}-{val_loss_after_n:.4f}",
-                save_top_k=3,
-                mode='min',
-            )
-            chk_callbacks = [top3_chk, top3_after_n]
 
         trainer = pl.Trainer(
             accelerator='auto',
@@ -160,7 +149,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             weight_decay=weight_decay,
             lambda_lr=lambda_lr,
             reduce_on_epoch=reduce_on_epoch,
-            reg_start=meep_start,
+            reg_start=reg_start,
             reg_lambda=meep_lambda,
         )
 
