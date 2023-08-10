@@ -30,7 +30,7 @@ pip install -r requirements.txt
 ```
 
 ## Training
-
+test
 ### Some considerations
 - Note that `mlflow run` is called with `--env-manager=local` to prevent the download/installation of the environment each time. The dependencies can be automatically installed omitting this parameter.
 - The models can be trained both using the mlflow CLI or calling the src/train.py script. The only difference is that for the CLI, the run name (for mlflow tracking) is set automatically by mlflow, while for the script, it's set according to the centers used for train and the loss function used.
