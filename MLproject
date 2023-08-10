@@ -6,7 +6,7 @@ entry_points:
   main:
     parameters:
       data_root: {type: string, default: "~/Code/datasets/wmh"}
-      centers: {type: string, default: 'training:Utrecht,Amsterdam,Singapore'}
+      centers: {type: string, default: 'training:Utrecht'}
       split_ratios: {type: string, default: [0.7, 0.1, 0.2]}
       epochs: {type: int, default: 800}
       batch_size: {type: int, default: 64}

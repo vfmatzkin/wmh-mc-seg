@@ -57,14 +57,8 @@ class BCEMEEPLoss(torch.nn.Module):
     def forward(self, y_pred, y_true, epoch):
         use_meep = epoch >= self.start_on_epoch
 
-        # print(f'Using MEEP: {use_meep}'
-        #       f' (epoch: {epoch}, start_on_epoch: {self.start_on_epoch})'
-        #       f' (m_lambda: {self.m_lambda})')
-
         ce = self.CE(y_pred, y_true)
         meep = self.MEEP(y_pred, y_true) if use_meep else 0
-
-        # print(f'CE: {ce}, MEEP: {meep}')
 
         return {'ce': ce, 'meep': -self.m_lambda * meep}
 

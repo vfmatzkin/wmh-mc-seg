@@ -19,6 +19,16 @@ The default hyperparameters are set in the MLproject file.
 [//]: # (##### Using MC dropout)
 
 
+## Environment creation
+
+If you use mlflow, the environment will be created automatically. Otherwise, you can create it manually with:
+
+```
+python3.10 -m venv env-wmh-mc-seg
+source env-wmh-mc-seg/bin/activate
+pip install -r requirements.txt
+```
+
 ## Training
 
 ### Some considerations
