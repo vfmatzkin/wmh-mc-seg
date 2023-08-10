@@ -1,5 +1,6 @@
 import csv
 import os
+import shutil
 
 import SimpleITK as sitk
 import mlflow
@@ -106,7 +107,7 @@ class WMHModel(pl.LightningModule):
 
     def __init__(self, net, criterion, learning_rate, optimizer_class,
                  weight_decay=0, lambda_lr=None, reduce_on_epoch=None,
-                 reg_start=0, reg_lambda=0.3, **kwargs):
+                 reg_start=0, reg_lambda=0.3, best_model_path=None, **kwargs):
         super().__init__()
 
         self.lr = learning_rate
@@ -117,6 +118,10 @@ class WMHModel(pl.LightningModule):
         self.weight_decay = weight_decay
         self.lambda_lr = lambda_lr
         self.reduce_on_epoch = reduce_on_epoch
+        if best_model_path is not None:
+            self.best_model_path = os.path.abspath(best_model_path)
+            os.makedirs(os.path.dirname(self.best_model_path), exist_ok=True)
+        self.best_model_path = best_model_path
 
         # Test-related parameters
         self.save_preds = kwargs.get('save_predictions', False)
@@ -143,7 +148,7 @@ class WMHModel(pl.LightningModule):
 
         return obj
 
-    def get_criterion(self, loss, meep_start=0, reg_lambda=0.3):
+    def get_criterion(self, loss, reg_start=0, reg_lambda=0.3):
         match loss.lower():
             case 'crossentropy' | 'ce':
                 return CrossEntropyLoss()
@@ -155,10 +160,10 @@ class WMHModel(pl.LightningModule):
                 return FocalLoss()
             case 'cemeep' | 'crosentropymeep' | 'meep':
                 self.using_meep = True
-                return BCEMEEPLoss(meep_start, reg_lambda)
+                return BCEMEEPLoss(reg_start, reg_lambda)
             case 'cekl' | 'crosentropykl' | 'kl':
                 self.using_meep = True
-                return BCEKLLoss(meep_start, reg_lambda)
+                return BCEKLLoss(reg_start, reg_lambda)
             case _:
                 raise ValueError(f'Unknown loss function: {loss}')
 
@@ -384,11 +389,15 @@ class WMHModel(pl.LightningModule):
         metr, ce = self.trainer.callback_metrics, self.current_epoch
         mlflow.log_metric('train_loss', metr['train_loss_epoch'].item(), ce)
         mlflow.log_metric('train_dice', metr['train_dice_epoch'].item(), ce)
+        # mlflow.log_param("last_epoch", self.current_epoch)
 
     def on_validation_epoch_end(self):
         metr, ce = self.trainer.callback_metrics, self.current_epoch
         mlflow.log_metric('val_loss', metr['val_loss_epoch'].item(), ce)
         mlflow.log_metric('val_dice', metr['val_dice_epoch'].item(), ce)
+        best_chk_path = self.trainer.checkpoint_callback.best_model_path
+        if best_chk_path != '' and self.best_model_path is not None:
+            shutil.copy(best_chk_path, self.best_model_path)
 
     def save_preds_info(self, preds_info_path, model_path, centers):
         """ Saves the paths to the saved predictions
