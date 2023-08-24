@@ -36,10 +36,10 @@ print('Last run on', time.ctime())
 @click.option('--csv-preds', type=click.STRING, default=None,
               help='CSV file to save the predictions paths')
 @click.option('--mc-ratio', type=click.FLOAT, default=0.0,
-                help='Dropout ratio for Monte Carlo Dropout. Note that it has to'
-                     ' be lower than the dropout used for training.')
+              help='Dropout ratio for Monte Carlo Dropout. Note that it has to'
+              ' be lower than the dropout used for training.')
 @click.option('--mc-samples', type=click.INT, default=0,
-                help='Number of Monte Carlo Dropout samples')
+              help='Number of Monte Carlo Dropout samples')
 def predict(data_root, centers, split_ratios, model_path, batch_size,
             patch_size, seed, output_dir, save_predictions, csv_preds,
             mc_ratio, mc_samples):

@@ -69,9 +69,10 @@ def print_auto_logged_info(r):
 @click.option('--reduce-on-epoch', required=False, type=click.INT,
               help='When to reduce LR (scheduler)')
 @click.option('--reg-start', required=False, type=click.INT,
-                help='When to start regularization')
+              help='When to start adding regularization term')
 @click.option('--meep-lambda', required=False, type=click.FLOAT,
-              help='Lambda for MEEP (if selected in --loss)')
+              help='Lambda for MEEP (if it was selected a loss that includes '
+                   'it).')
 def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
           loss, weight_decay, seed, patch_size, samples_per_volume,
           queue_length, tio_num_workers, custom_name, resume_from, lambda_lr,
@@ -172,12 +173,15 @@ if __name__ == "__main__":
     if os.getcwd().endswith('src'):
         os.chdir('..')
 
+
     if len(sys.argv) == 1:
         with open('MLproject', 'r') as f:
             mlproject = yaml.safe_load(f)
         params = mlproject['entry_points']['main']['parameters']
         sys.argv += [f"--{k.replace('_', '-')}="
                      f"{v['default']}" for k, v in params.items()]
+    elif len(sys.argv) == 2 and sys.argv[1] in ['--help', '-h']:
+        train()
     # Else, set MLproject as default parameters and update with passed args
     elif len(sys.argv) > 1:
         with open('MLproject', 'r') as f:

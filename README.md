@@ -1,23 +1,9 @@
 WMH MRI Segmentation
 ====================
 
-The data should be already downloaded and extracted in the `data_root` folder. 
-For more info on the data, see the [data README](https://www.notion.so/matzkin/2-WMH-Data-download-bf662e9460c444459e3934d3099d9285).
+The data should be already downloaded and extracted in the `data_root` folder.
 
 The default hyperparameters are set in the MLproject file.
-
-[//]: # (## Quickstart)
-
-[//]: # (### Get predictions from pretrained models)
-
-[//]: # (#### White Matter Intensity segmentation masks)
-
-[//]: # (#### Uncertainty estimates)
-
-[//]: # (##### Using entropy)
-
-[//]: # (##### Using MC dropout)
-
 
 ## Environment creation
 
@@ -29,82 +15,52 @@ source env-wmh-mc-seg/bin/activate
 pip install -r requirements.txt
 ```
 
+
+It should be activated before running any of the scripts.
+
 ## Training
+The models can be trained both using the mlflow CLI or calling the src/train.py script. The only difference is that for the CLI, the run name (for mlflow tracking) is set automatically by mlflow, while for the script, it's set according to the centers used for train and the loss function used.
 
-### Some considerations
-- Note that `mlflow run` is called with `--env-manager=local` to prevent the download/installation of the environment each time. The dependencies can be automatically installed omitting this parameter.
-- The models can be trained both using the mlflow CLI or calling the src/train.py script. The only difference is that for the CLI, the run name (for mlflow tracking) is set automatically by mlflow, while for the script, it's set according to the centers used for train and the loss function used.
-
-  This is why you could set the --run-name parameter in the CLI with a custom name.
   
   For both alternatives, the parameters will be taken from the MLProject file first, and the ones passed as arguments will set/override them.
 
-### Utrecht
-For training with utrecht data, run:
-
-#### Loss: DiceCE
-
+### With train.py script
+Located in the project folder (where the MLproject file is located), run:
 ```
-mlflow run . -P centers='training:Utrecht' --env-manager=local --run-name=training_Utrecht_DiceCE
+python src/train.py --centers='training:Singapore' --loss='KL'
 ```
 
-#### Loss: Focal
-
+### With MLflow CLI
+Located in the project folder (where the MLproject file is located), run:
 ```
-mlflow run . -P centers='training:Utrecht' -P loss=focal --env-manager=local
-```
-
-#### Loss: CE + MEEP
-
-```
-mlflow run . -P centers='training:Utrecht' -P loss=MEEP -P meep_start=50 -P meep_lambda=0.3 --env-manager=local
+mlflow run . -P centers='training:Singapore' -P loss='KL' --env-manager=local --run-name='training_Singapore_KL'
 ```
 
-Note that when choosing this loss, the `meep_start` and `meep_lambda` parameters should be set. The `meep_start` parameter indicates the epoch from which the MEEP loss will be used. The `meep_lambda` parameter indicates the weight of the MEEP loss. Check default values in the MLproject file otherwise.
+Note that `mlflow run` is called with `--env-manager=local` to prevent the download/installation of the environment each time. The dependencies can be automatically installed omitting this parameter.
 
-### Amsterdam
+Also, since the run name is set automatically by mlflow, the --run-name parameter can be specified (or not) to override it.
 
-For training with amsterdam data, run:
-
-```
-mlflow run . -P centers='training:Amsterdam' --env-manager=local
-```
-### Singapore
-
-For training with singapore data, run:
-
-```
-mlflow run . -P centers='training:Singapore' --env-manager=local
-```
+Refer to the [MLflow docs](https://www.mlflow.org/docs/latest/cli.html#mlflow-run) for more info on the CLI.
 
 ## Predict
+### With predict.py script
 
-### Some considerations
-
-- If you're using Monte Carlo dropout estimation (setting the options `--mc-ratio` and `--mc-samples`), `--mc-ratio` should be lower than the `dropout` option used for training.
-
-### Utrecht
-
+Located in the project folder (where the MLproject file is located), run:
 ```
-mlflow run . -e test --env-manager=local
+python src/predict.py --centers='test:Singapore' --model_path='checkpoints/training_Singapore_best.ckpt' --mc_samples=10 --mc_ratio=0.1
 ```
 
+### With MLflow CLI
 
-### Amsterdam
-
+Located in the project folder (where the MLproject file is located), run:
 ```
-mlflow run . -e test -P model_path=~/Code/wmh-mc-seg/checkpoints/training_Amsterdam_best.ckpt --env-manager=local
+mlflow run . -e predict -P centers='test:Singapore' -P model_path='checkpoints/training_Singapore_best.ckpt' -P mc_samples=10 -P mc_ratio=0.1 --env-manager=local
 ```
 
-### Singapore
 
-```
-mlflow run . -e test -P model_path=~/Code/wmh-mc-seg/checkpoints/training_Singapore_best.ckpt --env-manager=local
-``` 
+## Parameters
 
-
-**Parameters**
-The parameters are set in the MLproject file and have default values. Some of them which could require tuning are:
+The parameters are set in the MLproject file and have default values. Some of them could require tuning:
 
 - **train_centers:** Centers used in the format split1:center1,center2;split2:center1,center2, where splits: [training, test] and centers: [Utrecht, Amsterdam, Singapore]
 - **seed:** Random seed used for splitting the data.
@@ -114,3 +70,28 @@ The parameters are set in the MLproject file and have default values. Some of th
 - **samples_per_volume**: How many patches to take from each volume.
 - **queue_length**: Amount of patches loaded in memory for online processing. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
 - **tio_num_workers**: Number of subprocesses to use for data loading. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
+- **mc_ratio**: Ratio of dropout to use for Monte Carlo dropout estimation during inference. This ratio should be lower than the dropout used in training.
+- **mc_samples**: Number of samples to use for Monte Carlo dropout estimation.
+
+### Default hiperparameters for training
+
+| Parameter | Value | 
+| --- | --- |
+| data root | ~/Code/datasets/wmh |
+| centers | training:Utrecht |
+| split ratios | [0.7, 0.1, 0.2] |
+| epochs | 800 |
+| batch size | 64 |
+| lr | 0.001 |
+| dropout | 0.2 |
+| loss | MEEP |
+| weight decay | 0 |
+| seed | 42 |
+| patch size | 32 |
+| samples per volume | 20 |
+| queue length | 500 |
+| tio num workers | 8 |
+| reg start | 0 |
+| meep lambda | 0.3 |
+
+Run `python src/train.py --help` for more info on the parameters.

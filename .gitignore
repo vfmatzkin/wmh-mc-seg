@@ -5,3 +5,6 @@ checkpoints
 lightning_logs
 notebooks/**/*.csv
 .trash
+.ipynb_checkpoints
+**/__pycache__
+notebooks/old

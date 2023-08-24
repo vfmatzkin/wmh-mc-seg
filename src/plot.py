@@ -14,8 +14,11 @@ sns.set_style('whitegrid')
 
 colors = ['#3498db', '#2ecc71', '#e74c3c']  # colors for each center
 centers = ['utrecht', 'singapore', 'amsterdam']
-csv_cols = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh']
 
+# csv_cols will take the filenames from above before _training:
+csv_cols = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh',
+            'pred_mc_logitsmean','pred_mc_softmaxmean','pred_mc_hardmean',
+            'pred_mc_uncertmc']
 
 def get_array_from_nifti(path):
     return sitk.GetArrayFromImage(sitk.ReadImage(path))
@@ -23,23 +26,21 @@ def get_array_from_nifti(path):
 
 def compare_runs(runs_to_compare, metric_fn, **kwargs):
     for run_name, run_path in runs_to_compare.items():
-        # print(f"Generating plot for {run_name}...")
         metric_fn(run_path, run_name, **kwargs)
         print('\n')
 
 
 def dice_scores(path_csvs=None, alt_title=''):
-    old_dir = os.getcwd() if path_csvs else None
-    path_csvs = os.path.abspath(path_csvs) if path_csvs else None
-    os.chdir(path_csvs) if path_csvs else None
     dc = {}
     for center in centers:
-        df = pd.read_csv(f"{center}.csv", header=None)
+        center_path = os.path.join(os.path.abspath(path_csvs),
+                                  f"{center}.csv")
+        df = pd.read_csv(center_path, header=None)
         df.columns = csv_cols
         dc[center] = {'hard': []}
 
         for _, row in df.iterrows():
-            pred_hard_path, pred_softmax_path, logits_path, gt_path = row
+            pred_hard_path, pred_softmax_path, logits_path, gt_path, _, _, _ ,_ = row
 
             pred_hard = nib.load(pred_hard_path).get_fdata()
             gt = nib.load(gt_path).get_fdata()
@@ -63,7 +64,6 @@ def dice_scores(path_csvs=None, alt_title=''):
     fig.text(0.04, 0.5, 'Dice Score', va='center', rotation='vertical')
 
     fig.subplots_adjust(top=0.85, wspace=0.05)
-    os.chdir(old_dir) if old_dir else None
 
 
 def entropy(probs, eps=1e-3, apply_mean=True):
@@ -95,79 +95,14 @@ def get_b_mask_path(subj_path):
         return b_mask_path
 
 
-def entropy_segment(base_center, path_csvs=None):
-    os.chdir(path_csvs) if path_csvs else None
-    ent = {}
-
-    for center in centers:
-        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
-        df.columns = csv_cols
-        ent[center] = {}
-
-        for _, row in df.iterrows():
-            pred_softmax_path, gt_path = row[1], row[3]
-            subj_path = os.path.dirname(pred_softmax_path)
-            subj = os.path.basename(subj_path)
-            ent[center][subj] = {'pred': [], 'gt': [], 'bMask': []}
-
-            pred_softmax = nib.load(pred_softmax_path).get_fdata()
-            gt = nib.load(gt_path).get_fdata()
-            b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
-
-            pos_class = pred_softmax[:, :, :, 1].flatten()
-            gt_class = gt.flatten()
-            b_mask = b_mask.flatten()
-
-            thres_pos = np.where(pos_class >= 0.5)[0]
-            thres_gt_1 = np.where(gt_class == 1)[0]
-            thres_brain = np.where(b_mask == 1)[0]
-
-            filt_softmax = pos_class[thres_pos]
-            filt_gt_1 = pos_class[thres_gt_1]
-            filt_brain = pos_class[thres_brain]
-
-            entropy_pred = entropy(filt_softmax)
-            entropy_gt_1 = entropy(filt_gt_1)
-            entropy_brain = entropy(filt_brain)
-
-            ent[center][subj]['pred'].append(entropy_pred)
-            ent[center][subj]['gt'].append(entropy_gt_1)
-            ent[center][subj]['bMask'].append(entropy_brain)
-
-    # Print the entropy for each center and individual
-    for center in centers:
-        print(f"Center: {center}")
-        for key, value in ent[center].items():
-            print(f"{key}: {value}")
-
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(12, 8), sharey=True)
-    for i, center in enumerate(centers):
-        values = list(ent[center].values())
-        values_pred = [x['pred'][0] for x in values]
-        values_gt = [x['gt'][0] for x in values]
-        values_bMask = [x['bMask'][0] for x in values]
-
-        # Plot the boxplots for softmax predicted entropy
-        axs[i].boxplot(values_pred, positions=[0], widths=0.6)
-        axs[i].boxplot(values_gt, positions=[1], widths=0.6)
-        axs[i].boxplot(values_bMask, positions=[2], widths=0.6)
-
-        # axs[i].set_xticks(range(3))
-        axs[i].set_xticklabels(['Softmax > 0.5', 'Softmax in GT==1',
-                                'Softmax in brain mask'])
-        axs[i].set_title(f"{center}")
-
-
 def entropy_segment_per_center(path_csvs=None, alt_title=None):
-    old_dir = os.getcwd() if path_csvs else None
-    path_csvs = os.path.abspath(path_csvs) if path_csvs else None
-    os.chdir(path_csvs) if path_csvs else None
-
     segment_types = ['pred', 'gt', 'bMask']
     ent = {center_type: {} for center_type in segment_types}
 
     for center in centers:
-        df = pd.read_csv(f"{center}.csv", header=None)
+        center_path = os.path.join(os.path.abspath(path_csvs),
+                                  f"{center}.csv")
+        df = pd.read_csv(center_path, header=None)
         df.columns = csv_cols
 
         for segment_type in segment_types:
@@ -221,24 +156,23 @@ def entropy_segment_per_center(path_csvs=None, alt_title=None):
     if alt_title:
         plt.suptitle(alt_title)
     plt.show()
-    os.chdir(old_dir) if old_dir else None
 
 
 def append_round(imgs, img, decimals=2):
     return np.concatenate((imgs, np.around(np.array(img), decimals)))
 
 
-def probs_hist(base_center, path_csvs=None):
-    os.chdir(path_csvs) if path_csvs else None
+def probs_hist(path_csvs=None, alt_title=None):
     for center in centers:
         imgs_smx_0_0, imgs_smx_0_1, imgs_smx_1_0, imgs_smx_1_1 = \
             np.array([]), np.array([]), np.array([]), np.array([])
 
-        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
+        center_path = os.path.join(os.path.abspath(path_csvs), f"{center}.csv")
+        df = pd.read_csv(center_path, header=None)
         df.columns = csv_cols
 
         for _, row in df.iterrows():
-            _, pred_wmh_softmax, _, gt_wmh = row
+            _, pred_wmh_softmax, _, gt_wmh, _, _, _ ,_ = row
             print(f"Processing {pred_wmh_softmax}...")
 
             pred_softmax = nib.load(pred_wmh_softmax).get_fdata()
@@ -274,18 +208,23 @@ def probs_hist(base_center, path_csvs=None):
         axs[1, 1].set_yscale('log')
         axs[1, 1].set_title(f"{center} - Class 1 - GT 1")
 
+        if alt_title:
+            fig.suptitle(alt_title)
 
-def logits_hist(base_center, path_csvs=None):
-    os.chdir(path_csvs) if path_csvs else None
+    plt.show()
+
+
+def logits_hist(path_csvs=None, alt_title=None):
     for center in centers:
         imgs_logits_0_0, imgs_logits_0_1, imgs_logits_1_0, imgs_logits_1_1 = \
             np.array([]), np.array([]), np.array([]), np.array([])
 
-        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
+        center_path = os.path.join(os.path.abspath(path_csvs), f"{center}.csv")
+        df = pd.read_csv(center_path, header=None)
         df.columns = csv_cols
 
         for _, row in df.iterrows():
-            _, _, pred_logits, gt_wmh = row
+            _, _, pred_logits, gt_wmh, _, _, _ ,_ = row
             print(f"Processing {pred_logits}...")
 
             pred_logits = nib.load(pred_logits).get_fdata()
@@ -325,58 +264,11 @@ def logits_hist(base_center, path_csvs=None):
         # axs[1, 1].set_xlim([0, max_val])
         axs[1, 1].set_title(f"{center} - Class 1 - GT 1")
 
-
-def ece_reliability_sym(base_center, path_csvs=None):
-    os.chdir(path_csvs) if path_csvs else None
-    for center in centers:
-        df = pd.read_csv(f"{base_center}-{center}.csv", header=None)
-        df.columns = csv_cols
-
-        preds_0 = np.array([])
-        preds_1 = np.array([])
-        gt_0 = np.array([], dtype=np.uint8)
-        gt_1 = np.array([], dtype=np.uint8)
-
-        for i, row in df.iterrows():
-            _, pred_wmh_softmax, _, gt_wmh = row
-
-            pred_softmax = get_array_from_nifti(pred_wmh_softmax)
-            gt_wmh = get_array_from_nifti(gt_wmh)
-
-            # One-hot encode the ground truth labels
-            gt_one_hot = np.eye(2, dtype=np.uint8)[gt_wmh.astype(int)]
-
-            # Flatten the arrays and append to numpy array
-            preds_0 = np.concatenate((preds_0, pred_softmax[0].flatten()))
-            preds_1 = np.concatenate((preds_1, pred_softmax[1].flatten()))
-            gt_0 = np.concatenate((gt_0, gt_one_hot[:, :, :, 0].flatten()))
-            gt_1 = np.concatenate((gt_1, gt_one_hot[:, :, :, 1].flatten()))
-
-        # Define the number of bins for the reliability diagram
-        num_bins = 10
-
-        # Calculate the bin edges
-        bin_edges = np.linspace(0, 1, num_bins + 1)
-
-        emp_probs_0, pred_probs_0 = calibration_curve(gt_0, preds_0,
-                                                      n_bins=num_bins)
-        emp_probs_1, pred_probs_1 = calibration_curve(gt_1, preds_1,
-                                                      n_bins=num_bins)
-
-        ece_0 = get_ece(preds_0, gt_0)
-
-        # Plot the reliability diagram
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.plot([0, 1], [0, 1], 'k:', label='Perfectly calibrated')
-        ax.plot(pred_probs_0, emp_probs_0, 's-', label='Background')
-        ax.plot(pred_probs_1, emp_probs_1, 'o-', label='Foreground')
-        ax.set_xlabel('Predicted probability')
-        ax.set_ylabel('Empirical probability')
-        ax.set_ylim([-0.05, 1.05])
-        ax.legend()
-        ax.set_title(f"{center} - Reliability diagram\nECE: {ece_0:.4f}")
+        if alt_title:
+            fig.suptitle(alt_title)
 
     plt.show()
+
 
 
 def ece_reliability(path_csvs=None, alt_title=None):
@@ -390,7 +282,7 @@ def ece_reliability(path_csvs=None, alt_title=None):
         gt_1 = np.array([], dtype=np.uint8)
 
         for i, row in df.iterrows():
-            _, pred_wmh_softmax, _, gt_wmh = row
+            _, pred_wmh_softmax, _, gt_wmh, _, _, _ ,_ = row
 
             pred_softmax = get_array_from_nifti(pred_wmh_softmax)
             gt_wmh = get_array_from_nifti(gt_wmh)
@@ -446,7 +338,7 @@ def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain'):
         dice_ent = {center: []}
 
         for i, row in df.iterrows():
-            pred_hard_path, pred_softmax_path, _, gt_path = row
+            pred_hard_path, pred_softmax_path, _, gt_path, _, _, _ ,_ = row
             subj_path = os.path.dirname(pred_softmax_path)
 
             pred_hard = nib.load(pred_hard_path).get_fdata()
@@ -501,12 +393,11 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
 
     :return:
     """
-    old_dir = os.getcwd() if path_csvs else None
-    path_csvs = os.path.abspath(path_csvs) if path_csvs else None
-    os.chdir(path_csvs) if path_csvs else None
     unc_cond = {}
     for center in centers:
-        df = pd.read_csv(f"{center}.csv", header=None)
+        center_path = os.path.join(os.path.abspath(path_csvs),
+                                  f"{center}.csv")
+        df = pd.read_csv(center_path, header=None)
         df.columns = csv_cols
 
         unc_cond[center] = {
@@ -517,7 +408,7 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
         }
 
         for i, row in df.iterrows():
-            pred_hard_path, pred_softmax_path, _, gt_path = row
+            pred_hard_path, pred_softmax_path, _, gt_path, _, _, _ ,_ = row
 
         subj_path = os.path.dirname(pred_softmax_path)
 
@@ -600,4 +491,3 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
         fig.suptitle(alt_title)
 
     plt.show()
-    os.chdir(old_dir) if old_dir else None
