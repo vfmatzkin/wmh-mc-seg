@@ -55,7 +55,7 @@ def predict(data_root, centers, split_ratios, model_path, batch_size,
     trainer = pl.Trainer()
     trainer.test(model, dataloader)
 
-    model.save_preds_info(csv_preds, model_path, centers)
+    model.save_preds_info(csv_preds, model_path)
 
 
 if __name__ == '__main__':

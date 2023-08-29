@@ -399,19 +399,21 @@ class WMHModel(pl.LightningModule):
         if best_chk_path != '' and self.best_model_path is not None:
             shutil.copy(best_chk_path, self.best_model_path)
 
-    def save_preds_info(self, preds_info_path, model_path, centers):
+    def save_preds_info(self, preds_info_path, model_path, force_save=False):
         """ Saves the paths to the saved predictions
 
         :param preds_info_path: Path to the file where the paths will be saved
         :param model_path: Path to the model checkpoint
         :param centers: List of centers used for testing
         """
-        if preds_info_path is None:
+        if preds_info_path is None and force_save:
             folder_name = '_'.join(
                 os.path.basename(model_path).split('_')[0:-1])
             file_name = os.path.basename(model_path).replace('.ckpt', '.csv')
             preds_info_path = os.path.join(os.getcwd(), 'notebooks',
                                            folder_name, file_name)
+        elif preds_info_path is None:  # Not saving predictions csv by default
+            return None
 
         preds_info_path = os.path.abspath(os.path.expanduser(preds_info_path))
         os.makedirs(os.path.dirname(preds_info_path), exist_ok=True)
