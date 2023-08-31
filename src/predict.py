@@ -40,14 +40,16 @@ print('Last run on', time.ctime())
               ' be lower than the dropout used for training.')
 @click.option('--mc-samples', type=click.INT, default=0,
               help='Number of Monte Carlo Dropout samples')
+@click.option('--predict-split', type=click.STRING, default='test',
+              help='Split to use for prediction')
 def predict(data_root, centers, split_ratios, model_path, batch_size,
             patch_size, seed, output_dir, save_predictions, csv_preds,
-            mc_ratio, mc_samples):
+            mc_ratio, mc_samples, predict_split):
     split_ratios = ast.literal_eval(split_ratios)
     patch_size = None if patch_size == -1 else patch_size
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
-                               seed=seed)
+                               seed=seed, predict_split=predict_split)
 
     model = WMHModel.load_test(model_path, save_predictions, output_dir,
                                patch_size, mc_ratio, mc_samples)

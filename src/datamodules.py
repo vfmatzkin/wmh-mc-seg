@@ -5,6 +5,10 @@ import pytorch_lightning as pl
 import torchio as tio
 from torch.utils.data import DataLoader
 
+TRAINING = ['tr', 'train', 'training']
+VALIDATION = ['v', 'val', 'validation']
+TEST = ['te', 'test', 'testing']
+
 
 class MySubject(tio.Subject):
     """ MySubject class
@@ -37,21 +41,25 @@ class WMHDataModule(pl.LightningDataModule):
     :param centers: Centers to use. The format is: "phase1:cent1;phase2:cent2"
     :param split_ratios: Ratio of training data to use
     :param seed: Random seed
+    :param tio_num_workers: Number of workers for TorchIO
+    :param samples_per_volume: Number of samples per volume
+    :param queue_length: Queue length
+    :param predict_split: Split to use for prediction
     """
 
     def __init__(self, data_dir: str, batch_size: int, centers: str,
                  split_ratios: list, patch_size: int = None, seed: int = 42,
                  tio_num_workers: int = None, samples_per_volume: int = None,
-                 queue_length: int = None):
+                 queue_length: int = None, predict_split: str = 'test'):
         super().__init__()
         self.data_dir = os.path.expanduser(data_dir)  # Data directory
         self.batch_size = batch_size  # Batch size
         self.centers = centers  # Centers to use
-        self.train_dataset = None  # Training dataset
+        self.train_ds = None  # Training dataset
         self.split_ratios = split_ratios  # Ratios for training/validation/test
         self.seed = seed  # Random seed
-        self.val_dataset = None  # Validation dataset
-        self.test_dataset = None  # Test dataset
+        self.val_ds = None  # Validation dataset
+        self.test_ds = None  # Test dataset
         self.subjects = None  # List of subjects
         self.transforms = None  # Transforms to apply to the data
         self.patch_size = (patch_size, patch_size, patch_size)  # Patch size
@@ -62,9 +70,10 @@ class WMHDataModule(pl.LightningDataModule):
         self.label_name = 'wmh'
         self.label_probs = {0: 0.1, 1: 0.9}
         self.centers_dict = None  # Dictionary with the centers
-        self.subjects_train = None  # List of subjects for training
-        self.subjects_val = None  # List of subjects for validation
-        self.subjects_test = None  # List of subjects for testing
+        self.subj_train = None  # List of subjects for training
+        self.subj_val = None  # List of subjects for validation
+        self.subj_test = None  # List of subjects for testing
+        self.predict_split = predict_split  # Split to use for prediction
 
     def get_centers_dict(self):
         """  Convert the centers string to a dictionary
@@ -164,6 +173,11 @@ class WMHDataModule(pl.LightningDataModule):
                     ])
             self.split_aux(aux_train_imgs, tr_im, val_im, tst_im)
 
+        if self.predict_split:  # Allow to predict on train/val/test splits
+            tst_im = tr_im if self.predict_split in TRAINING \
+                else val_im if self.predict_split in VALIDATION \
+                else tst_im  # Default case (do nothing)
+
         return tr_im, val_im, tst_im
 
     def create_subjects(self, split):
@@ -198,9 +212,9 @@ class WMHDataModule(pl.LightningDataModule):
         Get the paths to the images and labels and create the TorchIO dataset.
         """
         tr_sp, vl_sp, ts_sp = self.generate_splits()
-        self.subjects_train = self.create_subjects(tr_sp)
-        self.subjects_val = self.create_subjects(vl_sp)
-        self.subjects_test = self.create_subjects(ts_sp)
+        self.subj_train = self.create_subjects(tr_sp)
+        self.subj_val = self.create_subjects(vl_sp)
+        self.subj_test = self.create_subjects(ts_sp)
 
     def setup(self, stage: str):
         # Some subjects have also 2 as "other pathology". We remap it to 0
@@ -214,21 +228,21 @@ class WMHDataModule(pl.LightningDataModule):
         ])
 
         if stage == "fit" or stage is None:
-            self.train_dataset = tio.SubjectsDataset(
-                self.samples_per_volume * self.subjects_train, self.transforms
+            self.train_ds = tio.SubjectsDataset(
+                self.samples_per_volume * self.subj_train, self.transforms
             )
-            self.val_dataset = tio.SubjectsDataset(
-                self.samples_per_volume * self.subjects_val, self.transforms
+            self.val_ds = tio.SubjectsDataset(
+                self.samples_per_volume * self.subj_val, self.transforms
             )
         if stage == "test" or stage is None:
             if self.split_ratios[2] == 0:
                 print(f'W: Test split ratio is 0. Will predict on all data '
                       f'({self.centers}).')
-                self.subjects_test = self.subjects_train + self.subjects_val + \
-                                     self.subjects_test
+                self.subj_test = self.subj_train + self.subj_val + \
+                                 self.subj_test
 
-            self.test_dataset = tio.SubjectsDataset(self.subjects_test,
-                                                    self.transforms)
+            self.test_ds = tio.SubjectsDataset(self.subj_test,
+                                               self.transforms)
 
     def get_dataloader(self, dataset, test=False):
         """ Get the dataloader for the dataset
@@ -260,10 +274,10 @@ class WMHDataModule(pl.LightningDataModule):
             return DataLoader(patches_queue, self.batch_size)
 
     def train_dataloader(self):
-        return self.get_dataloader(self.train_dataset)
+        return self.get_dataloader(self.train_ds)
 
     def val_dataloader(self):
-        return self.get_dataloader(self.val_dataset)
+        return self.get_dataloader(self.val_ds)
 
     def test_dataloader(self):
-        return self.get_dataloader(self.test_dataset, test=True)
+        return self.get_dataloader(self.test_ds, test=True)

@@ -229,11 +229,19 @@ class WMHModel(pl.LightningModule):
                 f'pred_logits_{run_id}.nii.gz': logits[i],
                 f'gt_wmh_{run_id}.nii.gz':
                     y[i, 1].to(torch.uint8) if y is not None else None,
-                f'pred_mc_logitsmean_{run_id}.nii.gz': lgs_mc_mean[0],
-                f'pred_mc_softmaxmean_{run_id}.nii.gz': sftmx_mc_mean[0],
-                f'pred_mc_hardmean_{run_id}.nii.gz': hard_pred_mc,
-                f'pred_mc_uncertmc_{run_id}.nii.gz': uncert_mc[1],
             }
+
+            if lgs_mc_arr.shape[0]:  # If there's any MC imgs to save
+                imgs.update({
+                    f'pred_mc_logitsmean_{run_id}.nii.gz': lgs_mc_mean[0],
+                    f'pred_mc_softmaxmean_{run_id}.nii.gz': sftmx_mc_mean[0],
+                    f'pred_mc_hardmean_{run_id}.nii.gz': hard_pred_mc,
+                })
+
+            if uncert_mc is not None:  # If there's any MC imgs to save and > 1
+                imgs.update({
+                    f'pred_mc_uncertmc_{run_id}.nii.gz': uncert_mc[1]
+                })
 
             paths = []
             for img_name, img in imgs.items():
@@ -405,6 +413,8 @@ class WMHModel(pl.LightningModule):
         :param preds_info_path: Path to the file where the paths will be saved
         :param model_path: Path to the model checkpoint
         :param centers: List of centers used for testing
+        :param force_save: Whether to save the predictions even if the
+        preds_info_path is None
         """
         if preds_info_path is None and force_save:
             folder_name = '_'.join(
