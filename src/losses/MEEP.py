@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-
+import numpy as np
 
 class Regularizers:
     """ MEEP/KL divergence term for the loss function
@@ -17,24 +17,36 @@ class Regularizers:
         self.epsilon = torch.tensor(epsilon).cuda() if torch.cuda.is_available() else torch.tensor(epsilon)
         self.type = type
 
-    def __call__(self, y_pred, y_true):
+    def __call__(self, y_pred, y_true, mask_ood=None, clamp_preds=True):
         y_pred_lm = torch.argmax(y_pred, dim=1)
-        y_true_lm = torch.argmax(y_true, dim=1)
-        misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
 
         # Clamp the predictions to prevent extreme values
-        y_pred_clamped = torch.clamp(y_pred, self.epsilon, 1.0 - self.epsilon)
+        y_pred_c = torch.clamp(y_pred, self.epsilon, 1.0 - self.epsilon) \
+            if clamp_preds else y_pred
 
-        if self.type == 'MEEP':
+        if self.type in ['MEEP', 'KL']:
+            y_true_lm = torch.argmax(y_true, dim=1)
+            misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
+            if self.type == 'MEEP':
+                reg = torch.mean(
+                    F.binary_cross_entropy(y_pred_c, y_pred_c,
+                                           reduction="none"),
+                    dim=1) * misclassified_pixels
+                reg = torch.sum(reg) / torch.sum(misclassified_pixels)
+            elif self.type == 'KL':
+                reg = torch.mean(
+                    torch.log(y_pred_c),
+                    dim=1) * misclassified_pixels
+                reg = torch.sum(reg) / torch.sum(misclassified_pixels)
+
+        if self.type == 'MEOOD':
+            # mask_ood is a list of 0s and 1s, where 1s indicate that the
+            # corresponding image is out of distribution
             reg = torch.mean(
-                F.binary_cross_entropy(y_pred_clamped, y_pred_clamped, reduction="none"),
-                dim=1) * misclassified_pixels
-            reg = torch.sum(reg) / torch.sum(misclassified_pixels)
-        elif self.type == 'KL':
-            reg = torch.mean(
-                torch.log(y_pred_clamped),
-                dim=1) * misclassified_pixels
-            reg = torch.sum(reg) / torch.sum(misclassified_pixels)
+                F.binary_cross_entropy(y_pred_c, y_pred_c,
+                                        reduction="none"),
+                dim=1) * mask_ood
+            reg = torch.sum(reg) / torch.sum(mask_ood)
         return reg
 
 
@@ -54,7 +66,7 @@ class BCEMEEPLoss(torch.nn.Module):
         self.m_lambda = reg_lambda
         self.start_on_epoch = start_on_epoch
 
-    def forward(self, y_pred, y_true, epoch):
+    def forward(self, y_pred, y_true, epoch, **kwargs):
         use_meep = epoch >= self.start_on_epoch
 
         ce = self.CE(y_pred, y_true)
@@ -79,7 +91,7 @@ class BCEKLLoss(torch.nn.Module):
         self.m_lambda = reg_lambda
         self.start_on_epoch = start_on_epoch
 
-    def forward(self, y_pred, y_true, epoch):
+    def forward(self, y_pred, y_true, epoch, **kwargs):
         use_kl = epoch >= self.start_on_epoch
 
         ce = self.CE(y_pred, y_true)
@@ -93,3 +105,24 @@ class CEMEOODLoss(torch.nn.Module):
     This loss computes the Cross Entropy loss if the image is in-distribution,
     and applies maximum entropy on out of distribution images.
     """
+    def __init__(self, start_on_epoch=0, reg_lambda=1, ood_centers=None):
+        super().__init__()
+        self.CE = torch.nn.CrossEntropyLoss()
+        self.MEOOD = Regularizers(type='MEOOD')
+        self.m_lambda = reg_lambda
+        self.start_on_epoch = start_on_epoch
+        self.ood_centers = ood_centers.split(',') if ood_centers else None
+
+    def forward(self, y_pred, y_true, epoch, centers, **kwargs):
+        use_reg = epoch >= self.start_on_epoch
+
+        centers_array = np.array(centers)
+        batch_size, channels, height, width, depth = y_pred.shape
+        mask = torch.tensor([[[[1 if centers_array[i] in self.ood_centers else 0
+                                for _ in range(width)] for _ in range(height)]
+                              for _ in range(depth)] for i in
+                             range(batch_size)], device=y_pred.device)
+        ce = self.CE(y_pred, y_true)
+        meood = self.MEOOD(y_pred, y_true, mask) if use_reg else 0
+
+        return {'ce': ce, 'meood': -self.m_lambda * meood}

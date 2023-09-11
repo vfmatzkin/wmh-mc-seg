@@ -157,19 +157,6 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         print('Training started at', start)
         trainer.fit(model, dataloader, ckpt_path=resume_from)
 
-        # # Save best model
-        # best_model_path = os.path.join('checkpoints', f'{run_name}_best.ckpt')
-        # if not os.path.exists(top3_chk.best_model_path):
-        #     print(f'Best model path does not exist: {top3_chk.best_model_path}.'
-        #           f' This may happen when resuming from a checkpoint, and the '
-        #           f'best model is still the one from the previous run. ')
-        #     if os.path.exists(resume_from):
-        #         print(f'Copying previous checkpoint from {resume_from} to '
-        #               f'{best_model_path} as best model.')
-        #     shutil.copy(resume_from, best_model_path)
-        # else:
-        #     shutil.copy(top3_chk.best_model_path, best_model_path)
-
         print('Training duration:', datetime.now() - start)
     print_auto_logged_info(mlflow.get_run(run_id=run.info.run_id))
 
@@ -177,7 +164,6 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
 if __name__ == "__main__":
     if os.getcwd().endswith('src'):
         os.chdir('..')
-
 
     if len(sys.argv) == 1:
         with open('MLproject', 'r') as f:

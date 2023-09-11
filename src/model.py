@@ -114,7 +114,8 @@ class WMHModel(pl.LightningModule):
         self.lr = learning_rate
         self.net = net
         self.custom_loss = False
-        self.criterion = self.get_criterion(criterion, reg_start, reg_lambda)
+        self.criterion = self.get_criterion(criterion, reg_start, reg_lambda,
+                                            ood_centers)
         self.optimizer_class = optimizer_class
         self.weight_decay = weight_decay
         self.lambda_lr = lambda_lr
@@ -123,7 +124,6 @@ class WMHModel(pl.LightningModule):
             self.best_model_path = os.path.abspath(best_model_path)
             os.makedirs(os.path.dirname(self.best_model_path), exist_ok=True)
         self.best_model_path = best_model_path
-        self.ood_centers = ood_centers
 
         # Test-related parameters
         self.save_preds = kwargs.get('save_predictions', False)
@@ -150,7 +150,7 @@ class WMHModel(pl.LightningModule):
 
         return obj
 
-    def get_criterion(self, loss, reg_start=0, reg_lambda=0.3):
+    def get_criterion(self, loss, reg_start=0, reg_lambda=0.3, ood_centers=None):
         match loss.lower():
             case 'crossentropy' | 'ce':
                 return CrossEntropyLoss()
@@ -167,7 +167,8 @@ class WMHModel(pl.LightningModule):
                 self.custom_loss = True
                 return BCEKLLoss(reg_start, reg_lambda)
             case 'meood' | 'cemeood':
-                return CEMEOODLoss(self.ood_centers)
+                self.custom_loss = True
+                return CEMEOODLoss(reg_start, reg_lambda, ood_centers)
             case _:
                 raise ValueError(f'Unknown loss function: {loss}')
 
@@ -363,8 +364,8 @@ class WMHModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         epoch = self.current_epoch
         y_hat, y, centers = self.infer_batch(batch)
-        losses = self.criterion(y_hat, y, epoch, centers) if self.custom_loss \
-            else self.criterion(y_hat, y)
+        losses = self.criterion(y_hat, y, epoch, centers=centers) \
+            if self.custom_loss else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='train_')
 
         loss = 0
@@ -383,9 +384,9 @@ class WMHModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         epoch = self.current_epoch
-        y_hat, y = self.infer_batch(batch)
-        losses = self.criterion(y_hat, y, epoch) if self.custom_loss \
-            else self.criterion(y_hat, y)
+        y_hat, y, centers = self.infer_batch(batch)
+        losses = self.criterion(y_hat, y, epoch, centers=centers) \
+            if self.custom_loss else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='val_')
 
         loss = 0
