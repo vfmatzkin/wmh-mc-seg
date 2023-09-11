@@ -73,10 +73,13 @@ def print_auto_logged_info(r):
 @click.option('--meep-lambda', required=False, type=click.FLOAT,
               help='Lambda for MEEP (if it was selected a loss that includes '
                    'it).')
+@click.option('--ood-centers', required=False, type=click.STRING,
+                help='Centers used as out of distribution data, used for MEOOD '
+                'loss, separated by commas (e.g.: Utretch,Singapore)')
 def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
           loss, weight_decay, seed, patch_size, samples_per_volume,
           queue_length, tio_num_workers, custom_name, resume_from, lambda_lr,
-          reduce_on_epoch, reg_start, meep_lambda):
+          reduce_on_epoch, reg_start, meep_lambda, ood_centers):
     split_ratios = ast.literal_eval(split_ratios)
     patch_size = None if patch_size == -1 else patch_size
     resume_from = None if resume_from == 'None' else resume_from
@@ -101,6 +104,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
         'reduce_on_epoch': reduce_on_epoch,
         'reg_start': reg_start,
         'meep_lambda': meep_lambda,
+        'ood_centers': ood_centers,
     }
 
     dataloader = WMHDataModule(data_root, batch_size, centers, split_ratios,
@@ -145,7 +149,8 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             reduce_on_epoch=reduce_on_epoch,
             reg_start=reg_start,
             reg_lambda=meep_lambda,
-            best_model_path=best_model_path
+            best_model_path=best_model_path,
+            ood_centers=ood_centers,
         )
 
         start = datetime.now()

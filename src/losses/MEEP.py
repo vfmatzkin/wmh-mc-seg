@@ -86,3 +86,10 @@ class BCEKLLoss(torch.nn.Module):
         kl = self.KL(y_pred, y_true) if use_kl else 0
 
         return {'ce': ce, 'kl': -self.m_lambda * kl}
+
+
+class CEMEOODLoss(torch.nn.Module):
+    """ Cross Entropy + MEOOD Loss
+    This loss computes the Cross Entropy loss if the image is in-distribution,
+    and applies maximum entropy on out of distribution images.
+    """

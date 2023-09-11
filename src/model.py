@@ -13,7 +13,7 @@ from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import compute_dice as dice
 from torch.nn import CrossEntropyLoss
 
-from losses import BCEMEEPLoss, BCEKLLoss
+from losses import BCEMEEPLoss, BCEKLLoss, CEMEOODLoss
 
 
 def compute_metrics(y_hat, y, text=''):
@@ -107,12 +107,13 @@ class WMHModel(pl.LightningModule):
 
     def __init__(self, net, criterion, learning_rate, optimizer_class,
                  weight_decay=0, lambda_lr=None, reduce_on_epoch=None,
-                 reg_start=0, reg_lambda=0.3, best_model_path=None, **kwargs):
+                 reg_start=0, reg_lambda=0.3, best_model_path=None,
+                 ood_centers=None, **kwargs):
         super().__init__()
 
         self.lr = learning_rate
         self.net = net
-        self.using_meep = False
+        self.custom_loss = False
         self.criterion = self.get_criterion(criterion, reg_start, reg_lambda)
         self.optimizer_class = optimizer_class
         self.weight_decay = weight_decay
@@ -122,6 +123,7 @@ class WMHModel(pl.LightningModule):
             self.best_model_path = os.path.abspath(best_model_path)
             os.makedirs(os.path.dirname(self.best_model_path), exist_ok=True)
         self.best_model_path = best_model_path
+        self.ood_centers = ood_centers
 
         # Test-related parameters
         self.save_preds = kwargs.get('save_predictions', False)
@@ -159,11 +161,13 @@ class WMHModel(pl.LightningModule):
             case 'focal':
                 return FocalLoss()
             case 'cemeep' | 'crosentropymeep' | 'meep':
-                self.using_meep = True
+                self.custom_loss = True
                 return BCEMEEPLoss(reg_start, reg_lambda)
             case 'cekl' | 'crosentropykl' | 'kl':
-                self.using_meep = True
+                self.custom_loss = True
                 return BCEKLLoss(reg_start, reg_lambda)
+            case 'meood' | 'cemeood':
+                return CEMEOODLoss(self.ood_centers)
             case _:
                 raise ValueError(f'Unknown loss function: {loss}')
 
@@ -304,6 +308,15 @@ class WMHModel(pl.LightningModule):
         t1_paths = batch['t1'][tio.PATH]
         y = batch['wmh'][tio.DATA] if 'wmh' in batch else None
 
+        base_folder = os.path.commonprefix(t1_paths)
+        centers = []
+
+        for file_path in t1_paths:
+            relative_path = file_path.replace(base_folder, '')
+            path_parts = relative_path.split('/')
+            center_part = path_parts[0]
+            centers.append(center_part)
+
         # Concatenate the input images along the channel dimension
         x = torch.cat((xc1, xc2), dim=1)
 
@@ -317,7 +330,7 @@ class WMHModel(pl.LightningModule):
         # Save predictions if it applies
         self.save_preds_tst(y_hat, y, logits, t1_paths, is_test, lgs_mc_arr,
                             sm_mc_arr)
-        return y_hat, y  # Return the predicted and GT masks (for train)
+        return y_hat, y, centers  # Return preds, gt and centers
 
     def get_mc_preds(self, x, batch, is_test):
         # For MC dropout:
@@ -349,8 +362,8 @@ class WMHModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         epoch = self.current_epoch
-        y_hat, y = self.infer_batch(batch)
-        losses = self.criterion(y_hat, y, epoch) if self.using_meep \
+        y_hat, y, centers = self.infer_batch(batch)
+        losses = self.criterion(y_hat, y, epoch, centers) if self.custom_loss \
             else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='train_')
 
@@ -371,7 +384,7 @@ class WMHModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         epoch = self.current_epoch
         y_hat, y = self.infer_batch(batch)
-        losses = self.criterion(y_hat, y, epoch) if self.using_meep \
+        losses = self.criterion(y_hat, y, epoch) if self.custom_loss \
             else self.criterion(y_hat, y)
         metrics = compute_metrics(y_hat, y, text='val_')
 
