@@ -1,9 +1,10 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
+
 
 class Regularizers:
-    """ MEEP/KL divergence term for the loss function
+    """ Regularizers class
 
     This therm is used as a regularizer for the loss function. It is used to
     penalize the model for being too confident in its predictions in the
@@ -14,7 +15,8 @@ class Regularizers:
     """
 
     def __init__(self, epsilon=1e-7, type='MEEP'):
-        self.epsilon = torch.tensor(epsilon).cuda() if torch.cuda.is_available() else torch.tensor(epsilon)
+        self.epsilon = torch.tensor(epsilon).cuda() \
+            if torch.cuda.is_available() else torch.tensor(epsilon)
         self.type = type
 
     def __call__(self, y_pred, y_true, mask_ood=None, clamp_preds=True):
@@ -44,7 +46,7 @@ class Regularizers:
             # corresponding image is out of distribution
             reg = torch.mean(
                 F.binary_cross_entropy(y_pred_c, y_pred_c,
-                                        reduction="none"),
+                                       reduction="none"),
                 dim=1) * mask_ood
             reg = torch.sum(reg) / torch.sum(mask_ood)
         return reg
@@ -105,6 +107,7 @@ class CEMEOODLoss(torch.nn.Module):
     This loss computes the Cross Entropy loss if the image is in-distribution,
     and applies maximum entropy on out of distribution images.
     """
+
     def __init__(self, start_on_epoch=0, reg_lambda=1, ood_centers=None):
         super().__init__()
         self.CE = torch.nn.CrossEntropyLoss()
@@ -122,7 +125,10 @@ class CEMEOODLoss(torch.nn.Module):
                                 for _ in range(width)] for _ in range(height)]
                               for _ in range(depth)] for i in
                              range(batch_size)], device=y_pred.device)
-        ce = self.CE(y_pred, y_true)
+
+        inv_msk = 1 - mask
+        ce = self.CE(y_pred * inv_msk.unsqueeze(1),
+                     y_true * inv_msk.unsqueeze(1))
         meood = self.MEOOD(y_pred, y_true, mask) if use_reg else 0
 
         return {'ce': ce, 'meood': -self.m_lambda * meood}

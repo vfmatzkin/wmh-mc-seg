@@ -312,8 +312,14 @@ class WMHModel(pl.LightningModule):
         base_folder = os.path.commonprefix(t1_paths)
         centers = []
 
+        # If all the images are from the same center, remove the center from the
+        # base folder
+        if not any(spl in os.path.split(base_folder.rstrip('/'))[1]
+                   for spl in ['training', 'test']):
+            base_folder = os.path.split(base_folder.rstrip('/'))[0]
+
         for file_path in t1_paths:
-            relative_path = file_path.replace(base_folder, '')
+            relative_path = file_path.replace(base_folder, '').lstrip('/')
             path_parts = relative_path.split('/')
             center_part = path_parts[0]
             centers.append(center_part)
@@ -373,6 +379,8 @@ class WMHModel(pl.LightningModule):
             for key in losses:
                 self.log(f'train_{key}', losses[key], prog_bar=True,
                          on_step=True, on_epoch=True)
+                mlflow.log_metric(f'train_{key}', losses[key], epoch)
+
                 loss += losses[key]
         else:
             loss = losses
@@ -394,6 +402,7 @@ class WMHModel(pl.LightningModule):
             for key in losses:
                 self.log(f'val_{key}', losses[key], prog_bar=True, on_step=True,
                          on_epoch=True)
+                mlflow.log_metric(f'val_{key}', losses[key], epoch)
                 loss += losses[key]
         else:
             loss = losses
