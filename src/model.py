@@ -13,7 +13,7 @@ from monai.losses import DiceLoss, DiceCELoss, FocalLoss
 from monai.metrics import compute_dice as dice
 from torch.nn import CrossEntropyLoss
 
-from losses import BCEMEEPLoss, BCEKLLoss, CEMEOODLoss
+from losses import BCEMEEPLoss, BCEKLLoss, CEMEOODLoss, BCEMEALLLoss
 
 
 def compute_metrics(y_hat, y, text=''):
@@ -113,7 +113,7 @@ class WMHModel(pl.LightningModule):
 
         self.lr = learning_rate
         self.net = net
-        self.custom_loss = False
+        self.custom_loss = False  # True if it's a loss defined in losses/
         self.criterion = self.get_criterion(criterion, reg_start, reg_lambda,
                                             ood_centers)
         self.optimizer_class = optimizer_class
@@ -163,6 +163,9 @@ class WMHModel(pl.LightningModule):
             case 'cemeep' | 'crosentropymeep' | 'meep':
                 self.custom_loss = True
                 return BCEMEEPLoss(reg_start, reg_lambda)
+            case 'cemeall' | 'crosentropymeall' | 'meall':
+                self.custom_loss = True
+                return BCEMEALLLoss(reg_start, reg_lambda)
             case 'cekl' | 'crosentropykl' | 'kl':
                 self.custom_loss = True
                 return BCEKLLoss(reg_start, reg_lambda)

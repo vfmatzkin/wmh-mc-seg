@@ -14,7 +14,7 @@ class Regularizers:
 
     """
 
-    def __init__(self, epsilon=1e-7, type='MEEP'):
+    def __init__(self, epsilon=1e-5, type='MEEP'):
         self.epsilon = torch.tensor(epsilon).cuda() \
             if torch.cuda.is_available() else torch.tensor(epsilon)
         self.type = type
@@ -26,15 +26,19 @@ class Regularizers:
         y_pred_c = torch.clamp(y_pred, self.epsilon, 1.0 - self.epsilon) \
             if clamp_preds else y_pred
 
-        if self.type in ['MEEP', 'KL']:
+        if self.type in ['MEEP', 'KL', 'MEALL']:
             y_true_lm = torch.argmax(y_true, dim=1)
             misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
             if self.type == 'MEEP':
-                reg = torch.mean(
-                    F.binary_cross_entropy(y_pred_c, y_pred_c,
-                                           reduction="none"),
-                    dim=1) * misclassified_pixels
+                reg = torch.mean(F.binary_cross_entropy(y_pred_c, y_pred_c,
+                                                        reduction="none"),
+                                 dim=1) * misclassified_pixels
                 reg = torch.sum(reg) / torch.sum(misclassified_pixels)
+            if self.type == 'MEALL':
+                reg = torch.mean(F.binary_cross_entropy(y_pred_c, y_pred_c,
+                                                        reduction="none"),
+                                 dim=1)
+                reg = torch.mean(reg)
             elif self.type == 'KL':
                 reg = torch.mean(
                     torch.log(y_pred_c),
@@ -75,6 +79,30 @@ class BCEMEEPLoss(torch.nn.Module):
         meep = self.MEEP(y_pred, y_true) if use_meep else 0
 
         return {'ce': ce, 'meep': -self.m_lambda * meep}
+
+
+class BCEMEALLLoss(torch.nn.Module):
+    def __init__(self, start_on_epoch=0, reg_lambda=0.3):
+        """ Cross Entropy + MEALL Loss
+
+        This loss function is a combination of the Binary Cross Entropy and the
+        Maximum Entropy on All Predictions (MEALL) loss term.
+
+        Based in Hintons paper: https://arxiv.org/pdf/1503.02531.pdf
+        """
+        super().__init__()
+        self.CE = torch.nn.CrossEntropyLoss()
+        self.MEALL = Regularizers(type='MEALL')
+        self.m_lambda = reg_lambda
+        self.start_on_epoch = start_on_epoch
+
+    def forward(self, y_pred, y_true, epoch, **kwargs):
+        use_reg = epoch >= self.start_on_epoch
+
+        ce = self.CE(y_pred, y_true)
+        meall = self.MEALL(y_pred, y_true) if use_reg else 0
+
+        return {'ce': ce, 'meall': -self.m_lambda * meall}
 
 
 class BCEKLLoss(torch.nn.Module):
