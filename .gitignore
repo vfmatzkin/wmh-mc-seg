@@ -3,7 +3,6 @@ mlruns
 scratches
 checkpoints
 lightning_logs
-notebooks/**/*.csv
 .trash
 .ipynb_checkpoints
 **/__pycache__
