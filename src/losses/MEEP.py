@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from monai.losses import DiceLoss
 
 
 class Regularizers:
@@ -81,6 +82,31 @@ class BCEMEEPLoss(torch.nn.Module):
         return {'ce': ce, 'meep': -self.m_lambda * meep}
 
 
+class DiceMEEPLoss(torch.nn.Module):
+    def __init__(self, start_on_epoch=0, reg_lambda=0.3):
+        """ Dice + MEEP Loss
+
+        This loss function is a combination of the Dice Loss with the Maximum
+        Entropy on Erroneous Predictions (MEEP) regularization term.
+
+        In the paper, meep_lambda is set to 0.3 for Cross Entropy.
+        https://arxiv.org/pdf/2112.12218.pdf
+        """
+        super().__init__()
+        self.Dice = DiceLoss()
+        self.MEEP = Regularizers(type='MEEP')
+        self.m_lambda = reg_lambda
+        self.start_on_epoch = start_on_epoch
+
+    def forward(self, y_pred, y_true, epoch, **kwargs):
+        use_meep = epoch >= self.start_on_epoch
+
+        dice = self.Dice(y_pred, y_true)
+        meep = self.MEEP(y_pred, y_true) if use_meep else 0
+
+        return {'diceL': dice, 'meep': -self.m_lambda * meep}
+
+
 class BCEMEALLLoss(torch.nn.Module):
     def __init__(self, start_on_epoch=0, reg_lambda=0.3):
         """ Cross Entropy + MEALL Loss
@@ -128,6 +154,30 @@ class BCEKLLoss(torch.nn.Module):
         kl = self.KL(y_pred, y_true) if use_kl else 0
 
         return {'ce': ce, 'kl': -self.m_lambda * kl}
+
+
+class BCEKLLoss(torch.nn.Module):
+    def __init__(self, start_on_epoch=0, reg_lambda=0.3):
+        """ Dice Loss + KL Loss
+
+        This loss function is a combination of the Dice Loss with the Maximum
+        Entropy on Erroneous Predictions (MEEP) regularization term.
+
+        https://arxiv.org/pdf/2112.12218.pdf
+        """
+        super().__init__()
+        self.Dice = DiceLoss()
+        self.KL = Regularizers(type='KL')
+        self.m_lambda = reg_lambda
+        self.start_on_epoch = start_on_epoch
+
+    def forward(self, y_pred, y_true, epoch, **kwargs):
+        use_kl = epoch >= self.start_on_epoch
+
+        dice = self.Dice(y_pred, y_true)
+        kl = self.KL(y_pred, y_true) if use_kl else 0
+
+        return {'diceL': dice, 'kl': -self.m_lambda * kl}
 
 
 class CEMEOODLoss(torch.nn.Module):
