@@ -14,7 +14,7 @@ from monai.metrics import compute_dice as dice
 from torch.nn import CrossEntropyLoss
 
 from losses import (BCEMEEPLoss, BCEKLLoss, CEMEOODLoss, BCEMEALLLoss,
-                    DiceMEEPLoss, DiceKLLoss)
+                    DiceMEEPLoss, DiceKLLoss, DiceMEALL)
 
 
 def compute_metrics(y_hat, y, text=''):
@@ -170,6 +170,9 @@ class WMHModel(pl.LightningModule):
             case 'cemeall' | 'crosentropymeall' | 'meall':
                 self.custom_loss = True
                 return BCEMEALLLoss(reg_start, reg_lambda)
+            case 'dicemeall':
+                self.custom_loss = True
+                return DiceMEALL(reg_start, reg_lambda)
             case 'cekl' | 'crosentropykl' | 'kl':
                 self.custom_loss = True
                 return BCEKLLoss(reg_start, reg_lambda)

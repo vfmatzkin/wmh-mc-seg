@@ -131,6 +131,30 @@ class BCEMEALLLoss(torch.nn.Module):
         return {'ce': ce, 'meall': -self.m_lambda * meall}
 
 
+class DiceMEALL(torch.nn.Module):
+    def __init__(self, start_on_epoch=0, reg_lambda=0.3):
+        """ Dice + MEALL Loss
+
+        This loss function is a combination of the Dice Loss and the
+        Maximum Entropy on All Predictions (MEALL) loss term.
+
+        Based in Hintons paper: https://arxiv.org/pdf/1503.02531.pdf
+        """
+        super().__init__()
+        self.Dice = torch.nn.DiceLoss()
+        self.MEALL = Regularizers(type='MEALL')
+        self.m_lambda = reg_lambda
+        self.start_on_epoch = start_on_epoch
+
+    def forward(self, y_pred, y_true, epoch, **kwargs):
+        use_reg = epoch >= self.start_on_epoch
+
+        diceL = self.Dice(y_pred, y_true)
+        meall = self.MEALL(y_pred, y_true) if use_reg else 0
+
+        return {'diceL': diceL, 'meall': -self.m_lambda * meall}
+
+
 class BCEKLLoss(torch.nn.Module):
     def __init__(self, start_on_epoch=0, reg_lambda=0.3):
         """ Cross Entropy + KL Loss
@@ -156,7 +180,7 @@ class BCEKLLoss(torch.nn.Module):
         return {'ce': ce, 'kl': -self.m_lambda * kl}
 
 
-class BCEKLLoss(torch.nn.Module):
+class DiceKLLoss(torch.nn.Module):
     def __init__(self, start_on_epoch=0, reg_lambda=0.3):
         """ Dice Loss + KL Loss
 
