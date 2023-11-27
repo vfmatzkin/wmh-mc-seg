@@ -13,6 +13,7 @@ from scipy.spatial.distance import directed_hausdorff
 from scipy.stats import linregress
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import auc
+from tabulate import tabulate
 
 
 def get_gt_paths(test_splits):
@@ -51,25 +52,27 @@ def get_b_mask_path(subj_path):
         return b_mask_path
 
 
-def dice_vs_entropy(plot_data, m_type='softmax_pos_class',
+def dice_vs_entropy(plot_data, entropy_mask='softmax_pos_class',
                     loss_centers_tendencies=True, loss_tendencies=True,
-                    print_ideal=True, print_metrics=True):
+                    print_ideal=False, dice_mask=None):
     """ Plot dice vs entropy for each run
 
     :param plot_data: Dictionary with the required data for plotting (same
     for all plotting functions)
-    :param m_type: Type of mask to use for entropy calculation. Options:
+    :param entropy_mask: Type of mask to use for entropy calculation. Options:
     'softmax_pos_class', 'gt', 'brain_mask'.
     :param loss_centers_tendencies: If True, plot the tendency for each
     Test_Center and Loss.
     :param loss_tendencies: If True, plot the tendency for each Loss no matter
     the Test_Center.
     :param print_ideal: If True, print the "ideal" line.
-    :param print_metrics: If True, print the Pearson correlation coefficient.
+    :param dice_mask: If not None, use it to filter the hard prediction and the
+    ground truth before computing the dice score. Options: 'brain_mask'.
     """
 
     centers_train, runs_to_compare, centers_test, test_splits, losses = plot_data.values()
     filter_pred_with_brain_mask = False
+    correlation_coefficients = {}
 
     for tr_center in centers_train:  # Three plots: one per training center
         plot_data = {}  # Dice vs Entropy scores for each run
@@ -101,24 +104,28 @@ def dice_vs_entropy(plot_data, m_type='softmax_pos_class',
                         get_b_mask_path(subj_path)
                     ).get_fdata()
 
-                    if filter_pred_with_brain_mask:
-                        pred_hard = pred_hard * b_mask
-
                     pos_class = pred_softmax[:, :, :, 1].flatten()
+                    hard_class = pred_hard.flatten()
                     gt_class = gt.flatten()
                     b_mask = b_mask.flatten()
 
-                    if m_type == 'softmax_pos_class':
+                    if filter_pred_with_brain_mask:
+                        pos_class = pos_class[np.where(b_mask == 1)[0]]
+
+                    if entropy_mask == 'softmax_pos_class':
                         filt = pos_class[np.where(pos_class >= 0.5)[0]]
-                    elif m_type == 'gt':
+                    elif entropy_mask == 'gt':
                         filt = pos_class[np.where(gt_class == 1)[0]]
                     else:
                         filt = pos_class[np.where(b_mask == 1)[0]]
 
-                    # Compute dice scores
-                    dice_hard = dice_score(pred_hard, gt)
-                    plot_data[loss][ts_center].append((dice_hard,
-                                                       entropy(filt)))
+                    if dice_mask == 'brain_mask':
+                        hard_class = hard_class[np.where(b_mask == 1)[0]]
+                        gt_class = gt_class[np.where(b_mask == 1)[0]]
+
+                    dice_hard = dice_score(hard_class, gt_class)
+                    entrop = entropy(filt)
+                    plot_data[loss][ts_center].append((dice_hard, entrop))
 
         # Create a wide figure with a 16:3 aspect ratio
         fig, ax = plt.subplots(figsize=(7, 6))
@@ -149,21 +156,17 @@ def dice_vs_entropy(plot_data, m_type='softmax_pos_class',
                         ax=ax)
 
         # Add trend lines for each color group
-        if loss_centers_tendencies:
-            for i, loss in enumerate(losses):
-                for j, center in enumerate(centers_test):
-                    color = colors[i]
-                    subset = df[
-                        (df['Loss'] == loss) & (df['Test_Center'] == center)]
-                    x, y = subset['Dice'], subset['Entropy']
-                    slope, intercept, r_value, _, _ = linregress(x, y)
+        for i, loss in enumerate(losses):
+            for j, center in enumerate(centers_test):
+                color = colors[i]
+                subset = df[
+                    (df['Loss'] == loss) & (df['Test_Center'] == center)]
+                x, y = subset['Dice'], subset['Entropy']
+                slope, intercept, r_value, _, _ = linregress(x, y)
+                if loss_centers_tendencies:
                     plt.plot(x, slope * x + intercept, color=color)
 
-                    # Print the Pearson correlation coefficient
-                    if print_metrics:
-                        print(
-                            f'{loss} {center} - Pearson correlation coefficient: '
-                            f'{r_value:.3f}')
+                correlation_coefficients[f'{loss} {center}'] = r_value
 
         ax.set_title(f'Dice vs Entropy using {tr_center} for training')
         ax.set_xlabel('Dice Coefficient')
@@ -177,21 +180,25 @@ def dice_vs_entropy(plot_data, m_type='softmax_pos_class',
             plt.plot([0, 1], [1, 0], linestyle='--', color='black')
 
         # Add trend lines for each color group
-        if loss_tendencies:
-            for i, loss in enumerate(losses):
-                darker_color = darker_colors[i]
-                subset = df[df['Loss'] == loss]
-                x, y = subset['Dice'], subset['Entropy']
-                slope, intercept, r_value, _, _ = linregress(x, y)
+        for i, loss in enumerate(losses):
+            darker_color = darker_colors[i]
+            subset = df[df['Loss'] == loss]
+            x, y = subset['Dice'], subset['Entropy']
+            slope, intercept, r_value, _, _ = linregress(x, y)
+            if loss_tendencies:
                 plt.plot(x, slope * x + intercept, color=darker_color)
 
-                # Print the Pearson correlation coefficient
-                if print_metrics:
-                    print(f'{loss} - Pearson correlation coefficient: '
-                          f'{r_value:.3f}')
+            correlation_coefficients[loss] = r_value
+
+        # Print the table
+        print("\nPearson Correlation Coefficients:\n")
+        table_data = [{'Metric': key, 'Coefficient': f'{value:.4f}'}
+                      for key, value in correlation_coefficients.items()]
+        print(tabulate(table_data, headers="keys", tablefmt="github"))
+        print("\n")
 
         # Adjust the layout
-        plt.suptitle(f'Mask used for entropy: {m_type}')
+        plt.suptitle(f'Mask used for entropy: {entropy_mask}')
         plt.tight_layout()
         plt.show()
 
@@ -294,8 +301,9 @@ def hausdorff(plot_data, use_brain_mask=False):
 
                     # Calculate Hausdorff distance
                     hausdorff_dist = \
-                    directed_hausdorff(np.argwhere(gt), np.argwhere(pred_hard))[
-                        0]
+                        directed_hausdorff(np.argwhere(gt),
+                                           np.argwhere(pred_hard))[
+                            0]
                     plot_data[loss][ts_center].append(hausdorff_dist)
 
         df = pd.DataFrame(plot_data)
@@ -995,11 +1003,11 @@ def error_retention_curve(plot_data, metric='nDSC'):
                     # Initialize retention data for this iteration
                     retention_curve = []
 
-                    # Slide the window
-                    for tau in np.linspace(1, 0, 11):
-                        retained_indices = np.where(uncertainties <= tau)[0]
-                        retained_mask = np.zeros_like(uncertainties)
-                        retained_mask[retained_indices] = 1
+                    # Sample by fractions of samples
+                    for frac in np.linspace(1.0, 0.0, 11):
+                        num_samples = int(frac * len(uncertainties))
+                        sorted_indices = np.argsort(uncertainties)
+                        retained_indices = sorted_indices[:num_samples]
 
                         replaced_pred = pred_hard_class.copy()
                         replaced_pred[retained_indices] = gt_class[
@@ -1028,16 +1036,18 @@ def error_retention_curve(plot_data, metric='nDSC'):
                 key = f'{loss} {tr_center} {ts_center}'
                 if key in retention_curves:
                     curve = retention_curves[key]
-                    auc_value = auc(np.linspace(0, 1, 11), curve)
-                    plt.plot(np.linspace(0, 1, 11), curve,
+                    auc_value = auc(np.linspace(1, 0, 11), curve[
+                                                           ::-1])  # Reverse the curve for correct AUC
+                    plt.plot(np.linspace(1, 0, 11), curve[::-1],
+                             # Reverse the curve for correct plotting
                              label=f'{loss} (AUC={auc_value:.2f})')
 
             plt.xlabel('Fraction of Retained Samples')
             plt.ylabel('Mean Dice Coefficient')
             plt.legend()
 
-            plt.xlim(-0.01, 1.01)
-            plt.ylim(-0.01, 1.01)
+            plt.xlim(0.0, 1.0)
+            plt.ylim(0.0, 1.0)
 
         plt.subplots_adjust(wspace=0.3)  # Adjust the value of wspace as needed
         plt.show()

@@ -116,6 +116,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
     run_name = custom_name if custom_name else run_name
 
     params['run_name'] = run_name
+    
 
     with mlflow.start_run(run_name=run_name) as run:
         if len(run.data.params) == 0:

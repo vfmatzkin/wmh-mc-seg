@@ -141,7 +141,7 @@ class DiceMEALL(torch.nn.Module):
         Based in Hintons paper: https://arxiv.org/pdf/1503.02531.pdf
         """
         super().__init__()
-        self.Dice = torch.nn.DiceLoss()
+        self.Dice = DiceLoss()
         self.MEALL = Regularizers(type='MEALL')
         self.m_lambda = reg_lambda
         self.start_on_epoch = start_on_epoch
