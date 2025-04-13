@@ -7,3 +7,63 @@ lightning_logs
 .ipynb_checkpoints
 **/__pycache__
 notebooks/old
+
+# Environment and virtual environments
+env/
+env-wmh-mc-seg/
+venv/
+.env
+.venv
+.python-version
+
+# Docker related
+.dockerignore
+jupyter-data/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Jupyter Notebook temp files
+.jupyter/
+jupyter_notebook_config.py
+
+# Generated prediction files and large data files
+*.nii.gz
+*.nii
+*.mha
+*.pt
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor directories and files
+.vscode/
+*.swp
+*.swo
+*~
+
+# Pytest and coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Poetry if you decide to use it for dependency management
+poetry.lock
+notebooks/training_*
+
+local/

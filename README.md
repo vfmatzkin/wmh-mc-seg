@@ -5,16 +5,45 @@ The data should be already downloaded and extracted in the `data_root` folder.
 
 The default hyperparameters are set in the MLproject file.
 
-## Environment creation
+## Environment Setup
+
+You have two options to set up the environment:
+
+### Option 1: Using Docker (Recommended)
+
+1. Install [Docker](https://www.docker.com/products/docker-desktop) and [Docker Compose](https://docs.docker.com/compose/install/)
+
+2. Edit the `docker-compose.yaml` file to map your datasets directory:
+  ```yaml
+  volumes:
+    - .:/app
+    - jupyter-data:/home/appuser/.local/share/jupyter
+    - /path/to/your/datasets:/home/appuser/Code/datasets
+  ```
+
+3. Start the Docker container:
+  ```
+  docker-compose up
+  ```
+
+4. Connect to the Jupyter server:
+  - Open the URL displayed in the terminal (typically http://localhost:8888/?token=...)
+  - When running notebooks in VSCode:
+    - Open a notebook file
+    - Click on the kernel selector in the top-right corner
+    - Choose "Select Kernel..." or "Select Another Kernel..."
+    - Select "Jupyter Server..." and enter the URL from the terminal
+    - Choose the Python kernel from the Docker container
+
+### Option 2: Manual Setup
 
 If you use mlflow, the environment will be created automatically. Otherwise, you can create it manually with:
 
 ```
 python3.10 -m venv env-wmh-mc-seg
-source env-wmh-mc-seg/bin/activate
+source env-wmh-mc-seg/bin/activate  # On Windows: env-wmh-mc-seg\Scripts\activate
 pip install -r requirements.txt
 ```
-
 
 It should be activated before running any of the scripts.
 
@@ -66,7 +95,7 @@ The parameters are set in the MLproject file and have default values. Some of th
 - **seed:** Random seed used for splitting the data.
 - **split_ratios:** List of ratios for train/validation/test splits, for the training images. The sum of the ratios should be 1.0. Note that this parameter can be used in the test phase as well.
 
-    This parameter is used along with the seed parameter. Each training partition used in train_centers, will be split separately according to this seedn and in case there's more than one center used, then will be merged.
+   This parameter is used along with the seed parameter. Each training partition used in train_centers, will be split separately according to this seedn and in case there's more than one center used, then will be merged.
 - **samples_per_volume**: How many patches to take from each volume.
 - **queue_length**: Amount of patches loaded in memory for online processing. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
 - **tio_num_workers**: Number of subprocesses to use for data loading. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
