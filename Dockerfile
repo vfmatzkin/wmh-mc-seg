@@ -21,6 +21,10 @@ RUN python -m venv /opt/venv && \
 # Set proper path
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Install Python dependencies at build time
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Switch to appuser for the remaining operations
 USER appuser
 

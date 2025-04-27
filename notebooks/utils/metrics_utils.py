@@ -10,7 +10,7 @@ from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D  # For custom legend elements
 from medpy.metric.binary import dc as dice_score
 from scipy.spatial.distance import directed_hausdorff
-from scipy.stats import linregress
+from scipy.stats import linregress, spearmanr
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import auc
 from tabulate import tabulate
@@ -52,155 +52,210 @@ def get_b_mask_path(subj_path):
         return b_mask_path
 
 
-def dice_vs_entropy(plot_data, entropy_mask='softmax_pos_class',
-                    loss_centers_tendencies=True, loss_tendencies=True,
-                    print_ideal=False, dice_mask=None):
-    """ Plot dice vs entropy for each run
-
-    :param plot_data: Dictionary with the required data for plotting (same
-    for all plotting functions)
-    :param entropy_mask: Type of mask to use for entropy calculation. Options:
-    'softmax_pos_class', 'gt', 'brain_mask'.
-    :param loss_centers_tendencies: If True, plot the tendency for each
-    Test_Center and Loss.
-    :param loss_tendencies: If True, plot the tendency for each Loss no matter
-    the Test_Center.
-    :param print_ideal: If True, print the "ideal" line.
-    :param dice_mask: If not None, use it to filter the hard prediction and the
-    ground truth before computing the dice score. Options: 'brain_mask'.
+def load_images(subj_path, run_name, b_mask_path):
+    """Load necessary images for processing.
+    
+    Args:
+        subj_path: Path to the subject folder
+        run_name: Name of the run
+        b_mask_path: Path to the brain mask
+    
+    Returns:
+        Tuple containing (gt, pred_softmax, pred_hard, b_mask)
     """
+    gt_path = os.path.join(subj_path, f'gt_wmh_{run_name}.nii.gz')
+    pred_softmax_path = os.path.join(subj_path, f'pred_wmh_softmax_{run_name}.nii.gz')
+    pred_hard_path = os.path.join(subj_path, f'pred_wmh_hard_{run_name}.nii.gz')
+    
+    gt = nib.load(gt_path).get_fdata()
+    pred_softmax = nib.load(pred_softmax_path).get_fdata()
+    pred_hard = nib.load(pred_hard_path).get_fdata()
+    b_mask = nib.load(b_mask_path).get_fdata()
+    
+    return gt, pred_softmax, pred_hard, b_mask
 
+
+def flatten_and_filter(pred_softmax, pred_hard, gt, b_mask, entropy_mask='softmax_pos_class', dice_mask=None):
+    """Flatten and filter the images based on the entropy mask and dice mask.
+    
+    Args:
+        pred_softmax: Predicted softmax probabilities
+        pred_hard: Hard predictions
+        gt: Ground truth
+        b_mask: Brain mask
+        entropy_mask: Type of mask to use for entropy calculation
+        dice_mask: Type of mask to use for dice calculation
+    
+    Returns:
+        Tuple containing (pos_class, hard_class, gt_class, b_mask)
+    """
+    pos_class = pred_softmax[:, :, :, 1].flatten()
+    hard_class = pred_hard.flatten()
+    gt_class = gt.flatten()
+    b_mask = b_mask.flatten()
+    
+    if entropy_mask == 'softmax_pos_class':
+        filt = np.where(pos_class >= 0.5)[0]
+        pos_class = pos_class[filt]
+    elif entropy_mask == 'gt':
+        filt = np.where(gt_class == 1)[0]
+        pos_class = pos_class[filt]
+    else:  # brain_mask
+        filt = np.where(b_mask == 1)[0]
+        pos_class = pos_class[filt]
+    
+    if dice_mask == 'brain_mask':
+        filt_brain = np.where(b_mask == 1)[0]
+        hard_class = hard_class[filt_brain]
+        gt_class = gt_class[filt_brain]
+    
+    return pos_class, hard_class, gt_class, b_mask
+
+
+def dice_vs_entropy(plot_data, entropy_mask='softmax_pos_class',
+                    loss_centers_tendencies=False,
+                    loss_tendencies=True, print_ideal=False, dice_mask=None,
+                    logit_dice=False):
     centers_train, runs_to_compare, centers_test, test_splits, losses = plot_data.values()
-    filter_pred_with_brain_mask = False
-    correlation_coefficients = {}
+    results = []
 
-    for tr_center in centers_train:  # Three plots: one per training center
-        plot_data = {}  # Dice vs Entropy scores for each run
-        for loss in losses:  # One subplot per loss
-            plot_data[loss] = {}
-            run_name = runs_to_compare[f'{loss} {tr_center}']
-            if f'{loss} {tr_center}' not in runs_to_compare.keys():
-                print(f'No run for {run_name}.')
+    test_center_rename = {
+        "UtAmSi": "In-distribution",
+        "UMCL": "Out-of-distribution"
+    }
+
+    for tr_center in centers_train:
+        for loss in losses:
+            run_name = runs_to_compare.get(f'{loss} {tr_center}')
+            if run_name is None:
+                print(f'No run for {loss} {tr_center}.')
                 continue
-            for ts_center in centers_test:  # For each center used for testing
-                plot_data[loss][ts_center] = []
-                gt_pths = get_gt_paths(
-                    test_splits[ts_center])  # Lst of tst sbj pts
-                for subj_path in gt_pths:
-                    gt_path = os.path.join(
-                        subj_path, f'gt_wmh_{run_name}.nii.gz'
-                    )
-                    pred_softmax_path = os.path.join(
-                        subj_path, f'pred_wmh_softmax_{run_name}.nii.gz'
-                    )
-                    pred_hard_path = os.path.join(
-                        subj_path, f'pred_wmh_hard_{run_name}.nii.gz'
+
+            for ts_center in centers_test:
+                gt_paths = get_gt_paths(test_splits[ts_center])
+                for subj_path in gt_paths:
+                    gt, pred_softmax, pred_hard, b_mask = load_images(
+                        subj_path, run_name, get_b_mask_path(subj_path)
                     )
 
-                    gt = nib.load(gt_path).get_fdata()
-                    pred_softmax = nib.load(pred_softmax_path).get_fdata()
-                    pred_hard = nib.load(pred_hard_path).get_fdata()
-                    b_mask = nib.load(
-                        get_b_mask_path(subj_path)
-                    ).get_fdata()
-
-                    pos_class = pred_softmax[:, :, :, 1].flatten()
-                    hard_class = pred_hard.flatten()
-                    gt_class = gt.flatten()
-                    b_mask = b_mask.flatten()
-
-                    if filter_pred_with_brain_mask:
-                        pos_class = pos_class[np.where(b_mask == 1)[0]]
-
-                    if entropy_mask == 'softmax_pos_class':
-                        filt = pos_class[np.where(pos_class >= 0.5)[0]]
-                    elif entropy_mask == 'gt':
-                        filt = pos_class[np.where(gt_class == 1)[0]]
-                    else:
-                        filt = pos_class[np.where(b_mask == 1)[0]]
-
-                    if dice_mask == 'brain_mask':
-                        hard_class = hard_class[np.where(b_mask == 1)[0]]
-                        gt_class = gt_class[np.where(b_mask == 1)[0]]
+                    pos_class, hard_class, gt_class, b_mask = flatten_and_filter(
+                        pred_softmax, pred_hard, gt, b_mask, entropy_mask,
+                        dice_mask
+                    )
 
                     dice_hard = dice_score(hard_class, gt_class)
-                    entrop = entropy(filt)
-                    plot_data[loss][ts_center].append((dice_hard, entrop))
+                    entrop = entropy(pos_class)
+                    results.append({
+                        'Loss': loss, 'Test_Center': ts_center,
+                        'Dice': dice_hard, 'Entropy': entrop
+                    })
+    df = pd.DataFrame(results)
 
-        # Create a wide figure with a 16:3 aspect ratio
-        fig, ax = plt.subplots(figsize=(7, 6))
+    unique_centers = df['Test_Center'].unique()
+    unique_losses = df['Loss'].unique()
 
-        data = []
-        colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
-        darker_colors = ['darkblue', 'darkgreen', 'darkred', 'darkcyan',
-                         'darkmagenta', 'darkyellow', 'dimgray', 'gray']
-        markers = ['o', 's', 'D', '^', 'v', '<', '>', 'p', '*']
-        losses = list(plot_data.keys())
+    fig, ax = plt.subplots(figsize=(6, 5))  # Reduced figure size
 
-        for i, (loss, centers_data) in enumerate(plot_data.items()):
-            for center, values in centers_data.items():
-                dice_values, entropy_values = zip(*values)
-                data.extend(
-                    [(loss, center, dice, entropy) for dice, entropy in
-                     zip(dice_values, entropy_values)])
+    if logit_dice:
+        df['Logit_Dice'] = np.log(df['Dice'] / (1 - df['Dice']))
+        scatter = sns.scatterplot(data=df, x='Logit_Dice', y='Entropy',
+                                  hue='Loss', style='Test_Center', s=50)
+        ax.set_xlabel('Logit(Dice Coefficient)', fontsize=12)
+    else:
+        scatter = sns.scatterplot(data=df, x='Dice', y='Entropy', hue='Loss',
+                                  style='Test_Center', s=50)
+        ax.set_xlabel('Dice Coefficient', fontsize=12)
 
-        df = pd.DataFrame(data,
-                          columns=['Loss', 'Test_Center', 'Dice',
-                                   'Entropy'])
+    if print_ideal:
+        ax.plot([0, 1], [1, 0], linestyle='--', color='black', linewidth=1,
+                label='Ideal')
 
-        # Create the scatter plot
-        sns.scatterplot(data=df, x='Dice', y='Entropy', hue='Loss',
-                        style='Test_Center',
-                        palette=colors[:len(df['Loss'].unique())],
-                        markers=markers[:len(df['Test_Center'].unique())],
-                        ax=ax)
-
-        # Add trend lines for each color group
-        for i, loss in enumerate(losses):
-            for j, center in enumerate(centers_test):
-                color = colors[i]
+    if loss_centers_tendencies:
+        for loss in losses:
+            for center in centers_test:
                 subset = df[
                     (df['Loss'] == loss) & (df['Test_Center'] == center)]
-                x, y = subset['Dice'], subset['Entropy']
-                slope, intercept, r_value, _, _ = linregress(x, y)
-                if loss_centers_tendencies:
-                    plt.plot(x, slope * x + intercept, color=color)
+                if not subset.empty:
+                    sns.regplot(x='Dice' if not logit_dice else 'Logit_Dice',
+                                y='Entropy', data=subset, scatter=False,
+                                ci=None, ax=ax, line_kws={'linewidth': 1})
 
-                correlation_coefficients[f'{loss} {center}'] = r_value
-
-        ax.set_title(f'Dice vs Entropy using {tr_center} for training')
-        ax.set_xlabel('Dice Coefficient')
-        ax.set_ylabel('Entropy')
-        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-        ax.set_xlim([0, 1])
-        ax.set_ylim([0, 1])
-
-        # Add the ideal line
-        if print_ideal:
-            plt.plot([0, 1], [1, 0], linestyle='--', color='black')
-
-        # Add trend lines for each color group
-        for i, loss in enumerate(losses):
-            darker_color = darker_colors[i]
+    if loss_tendencies:
+        for loss in losses:
             subset = df[df['Loss'] == loss]
-            x, y = subset['Dice'], subset['Entropy']
-            slope, intercept, r_value, _, _ = linregress(x, y)
-            if loss_tendencies:
-                plt.plot(x, slope * x + intercept, color=darker_color)
+            if not subset.empty:
+                sns.regplot(x='Dice' if not logit_dice else 'Logit_Dice',
+                            y='Entropy', data=subset, scatter=False, ci=None,
+                            ax=ax, line_kws={'linewidth': 1})
 
-            correlation_coefficients[loss] = r_value
+    ax.set_title('Dice vs. Entropy', fontsize=14, pad=10)
+    ax.set_ylabel('Entropy', fontsize=12)
+    ax.tick_params(axis='both', which='major', labelsize=10)
+    if not logit_dice:
+        ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
 
-        # Print the table
-        print("\nPearson Correlation Coefficients:\n")
-        table_data = [{'Metric': key, 'Coefficient': f'{value:.4f}'}
-                      for key, value in correlation_coefficients.items()]
-        print(tabulate(table_data, headers="keys", tablefmt="github"))
-        print("\n")
+    # Remove the default legend
+    ax.get_legend().remove()
 
-        # Adjust the layout
-        plt.suptitle(f'Mask used for entropy: {entropy_mask}')
-        plt.tight_layout()
-        plt.show()
+    # Calculate Spearman correlations and find the maximum length of loss names for alignment
+    max_len = max(len(loss.split('_')[1] if '_' in loss else loss) for loss in
+                  unique_losses)
+
+    # Create custom legend elements
+    palette = sns.color_palette(n_colors=len(unique_losses))
+    loss_elements = []
+    for i, loss in enumerate(unique_losses):
+        subset = df[df['Loss'] == loss]
+        if not subset.empty:
+            corr, _ = pearsonr(subset['Dice'], subset['Entropy'])
+            corr, _ = spearmanr(subset['Dice'], subset['Entropy'])
+            loss_name = loss.split('_')[1] if '_' in loss else loss
+            padded_loss_name = f"{loss_name}{' ' * (max_len - len(loss_name))}"  # Adding this padding doesn't work because they're still disaligned
+            loss_label = f"{padded_loss_name} ({corr:.3f})"
+            loss_elements.append(
+                plt.Line2D([0], [0], marker='s', color=palette[i], linestyle='',
+                           markersize=8, label=loss_label))
+
+    center_elements = [
+        plt.Line2D([0], [0], marker='o' if center == 'UMCL' else 'x',
+                   color='black', linestyle='', markersize=8, label=center)
+        for center in unique_centers]
+
+    if rename_centers:
+        for i, center in enumerate(center_elements):
+            center_elements[i].set_label(
+                rename_centers.get(center.get_label(), center.get_label()))
+    # Sort center elements alphabetically
+    center_elements = sorted(center_elements, key=lambda x: x.get_label())
+
+    # Add empty elements to ensure column break
+    num_loss = len(loss_elements)
+    num_center = len(center_elements)
+    max_elements = max(num_loss, num_center)
+
+    loss_elements = [plt.Line2D([0], [0], marker='', linestyle='',
+                                label='Loss')] + loss_elements
+    loss_elements += [plt.Line2D([0], [0], marker='', linestyle='',
+                                 label='')] * (max_elements - num_loss)
+    center_elements = [plt.Line2D([0], [0], marker='', linestyle='',
+                                  label='Data')] + center_elements
+    center_elements += [plt.Line2D([0], [0], marker='', linestyle='',
+                                   label='')] * (max_elements - num_center)
+
+    # Combine all legend elements
+    all_elements = loss_elements + center_elements
+
+    # Create a single legend with two columns
+    legend = ax.legend(handles=all_elements, fontsize=8,
+                       bbox_to_anchor=(1.05, 1), loc='upper left',
+                       ncol=2, columnspacing=1, handletextpad=0.5)
+    for text in legend.get_texts():
+        text.set_fontname('DejaVu Sans Mono')
+    plt.tight_layout()
+    plt.subplots_adjust(right=0.75)  # Adjust right margin for legend
+
+    plt.show()
 
 
 def dice(plot_data, use_brain_mask=False):
