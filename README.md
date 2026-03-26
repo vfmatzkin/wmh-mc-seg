@@ -143,16 +143,18 @@ data_root/
 
 If you use this code, please cite:
 
-> Matzkin, F. et al. "Uncertainty estimation for White Matter Hyperintensity segmentation with Monte Carlo dropout and calibrated losses." *Computers in Biology and Medicine*, 2025. [DOI](https://doi.org/10.1016/j.compbiomed.2025.109904)
+> Matzkin, F. et al. "Towards reliable WMH segmentation under domain shift: An application study using maximum entropy regularization to improve uncertainty estimation." *Computers in Biology and Medicine*, vol. 196, Part A, 110639, 2025. [DOI](https://doi.org/10.1016/j.compbiomed.2025.110639)
 
 ```bibtex
 @article{matzkin2025wmh,
-  title={Uncertainty estimation for White Matter Hyperintensity segmentation with Monte Carlo dropout and calibrated losses},
-  author={Matzkin, Franco},
+  title={Towards reliable {WMH} segmentation under domain shift: An application study using maximum entropy regularization to improve uncertainty estimation},
+  author={Matzkin, Franco and Larrazabal, Agostina and Milone, Diego H. and Dolz, Jose and Ferrante, Enzo},
   journal={Computers in Biology and Medicine},
+  volume={196},
+  pages={110639},
   year={2025},
   publisher={Elsevier},
-  doi={10.1016/j.compbiomed.2025.109904}
+  doi={10.1016/j.compbiomed.2025.110639}
 }
 ```
 
