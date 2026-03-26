@@ -31,7 +31,7 @@ dev = [
     "jupyter",
     "notebook",
     "ipykernel",
-    "statannot",
+    "statannotations>=0.6",
     "scikit-learn>=1.2",
     "uncertainty-calibration",
     "shap>=0.41",
