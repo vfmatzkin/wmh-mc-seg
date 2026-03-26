@@ -22,13 +22,13 @@ def _ui_controls(mo):
         full_width=True,
     )
     run_name_ce = mo.ui.text(
-        value="training_Utrecht_Amsterdam_Singapore_CE_3684_best",
-        label="CE run name",
+        value="training_Utrecht_meep_3932_best",
+        label="Run 1 name",
         full_width=True,
     )
     run_name_meep = mo.ui.text(
-        value="training_Utrecht_Amsterdam_Singapore_MEEP_6996_best",
-        label="CE+MEEP run name",
+        value="training_Utrecht_meep_3932_best",
+        label="Run 2 name",
         full_width=True,
     )
     return subject_path, run_name_ce, run_name_meep
@@ -177,7 +177,7 @@ def _fig1(mo, plt, np, flair, ce_prob, meep_prob, aspect_axial, aspect_sagittal,
     _fig1.tight_layout(rect=[0, 0, 0.9, 1])
 
     fig1_widget = mo.mpl.interactive(_fig1)
-    return (fig1_widget,)
+    return fig1_widget
 
 
 @app.cell
@@ -239,18 +239,8 @@ def _fig2(mo, plt, np, flair, ce_entropy, meep_entropy, aspect_axial, slice_z, s
 
 
 @app.cell
-def _layout(
-    mo,
-    subject_path,
-    run_name_ce,
-    run_name_meep,
-    slice_z,
-    slice_x,
-    show_entropy,
-    fig1_widget,
-    fig2_widget,
-):
-    _controls = mo.vstack(
+def _controls_panel(mo, subject_path, run_name_ce, run_name_meep, slice_z, slice_x, show_entropy):
+    return mo.vstack(
         [
             mo.md("## NIfTI Viewer — Fig 1 & 2"),
             mo.md("### Data paths"),
@@ -263,7 +253,6 @@ def _layout(
             show_entropy,
         ]
     )
-    return mo.vstack([_controls, fig1_widget, fig2_widget])
 
 
 if __name__ == "__main__":
