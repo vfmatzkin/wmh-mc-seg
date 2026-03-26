@@ -37,6 +37,7 @@ dev = [
     "shap>=0.41",
     "pytest>=7.0",
 ]
+interactive = ["marimo>=0.10"]
 
 [tool.pytest.ini_options]
 markers = [

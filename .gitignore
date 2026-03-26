@@ -67,6 +67,7 @@ poetry.lock
 notebooks/training_*
 
 local/
+data/cache/*.csv
 
 # Generated figures and data at repo root
 Figure*.png
