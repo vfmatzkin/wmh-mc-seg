@@ -139,6 +139,23 @@ data_root/
     ...
 ```
 
+## Citation
+
+If you use this code, please cite:
+
+> Matzkin, F. et al. "Uncertainty estimation for White Matter Hyperintensity segmentation with Monte Carlo dropout and calibrated losses." *Computers in Biology and Medicine*, 2025. [DOI](https://doi.org/10.1016/j.compbiomed.2025.109904)
+
+```bibtex
+@article{matzkin2025wmh,
+  title={Uncertainty estimation for White Matter Hyperintensity segmentation with Monte Carlo dropout and calibrated losses},
+  author={Matzkin, Franco},
+  journal={Computers in Biology and Medicine},
+  year={2025},
+  publisher={Elsevier},
+  doi={10.1016/j.compbiomed.2025.109904}
+}
+```
+
 ## Stack
 
 Python 3.10+, PyTorch 2.x, Lightning 2.x, MONAI, TorchIO, MLflow.
