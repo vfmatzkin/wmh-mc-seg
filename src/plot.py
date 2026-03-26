@@ -1,4 +1,5 @@
 import os.path
+import subprocess
 
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
@@ -12,13 +13,23 @@ from sklearn.calibration import calibration_curve
 
 sns.set_style('whitegrid')
 
-colors = ['#3498db', '#2ecc71', '#e74c3c']  # colors for each center
-centers = ['utrecht', 'singapore', 'amsterdam']
+DEFAULT_COLORS = ['#3498db', '#2ecc71', '#e74c3c']  # colors for each center
+DEFAULT_CENTERS = ['utrecht', 'singapore', 'amsterdam']
 
-# csv_cols will take the filenames from above before _training:
-csv_cols = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh',
-            'pred_mc_logitsmean','pred_mc_softmaxmean','pred_mc_hardmean',
-            'pred_mc_uncertmc']
+# DEFAULT_CSV_COLS takes the filenames from above before _training:
+DEFAULT_CSV_COLS = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh',
+                    'pred_mc_logitsmean', 'pred_mc_softmaxmean', 'pred_mc_hardmean',
+                    'pred_mc_uncertmc']
+
+
+def _load_center_csv(path_csvs, center, columns=None):
+    if columns is None:
+        columns = DEFAULT_CSV_COLS
+    center_path = os.path.join(os.path.abspath(path_csvs), f"{center}.csv")
+    df = pd.read_csv(center_path, header=None)
+    df.columns = columns
+    return df
+
 
 def get_array_from_nifti(path):
     return sitk.GetArrayFromImage(sitk.ReadImage(path))
@@ -30,17 +41,17 @@ def compare_runs(runs_to_compare, metric_fn, **kwargs):
         print('\n')
 
 
-def dice_scores(path_csvs=None, alt_title=''):
+def dice_scores(path_csvs=None, alt_title='', centers=None, colors=None):
+    centers = centers or DEFAULT_CENTERS
+    colors = colors or DEFAULT_COLORS
+
     dc = {}
     for center in centers:
-        center_path = os.path.join(os.path.abspath(path_csvs),
-                                  f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
         dc[center] = {'hard': []}
 
         for _, row in df.iterrows():
-            pred_hard_path, pred_softmax_path, logits_path, gt_path, _, _, _ ,_ = row
+            pred_hard_path, pred_softmax_path, logits_path, gt_path, _, _, _, _ = row
 
             pred_hard = nib.load(pred_hard_path).get_fdata()
             gt = nib.load(gt_path).get_fdata()
@@ -89,21 +100,20 @@ def get_b_mask_path(subj_path):
     else:
         t1_path = os.path.join(subj_path, 'pre', 'T1.nii.gz')
         b_t1b_path = os.path.join(subj_path, 'pre', 'T1_brain.nii.gz')
-        cmd = f"bet {t1_path} {b_t1b_path} -m"
-        os.system(cmd)
+        cmd = ['bet', t1_path, b_t1b_path, '-m']
+        subprocess.run(cmd, check=True)
         print(f"Created brain mask for {subj_path}")
         return b_mask_path
 
 
-def entropy_segment_per_center(path_csvs=None, alt_title=None):
+def entropy_segment_per_center(path_csvs=None, alt_title=None, centers=None):
+    centers = centers or DEFAULT_CENTERS
+
     segment_types = ['pred', 'gt', 'bMask']
     ent = {center_type: {} for center_type in segment_types}
 
     for center in centers:
-        center_path = os.path.join(os.path.abspath(path_csvs),
-                                  f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
 
         for segment_type in segment_types:
             ent[segment_type][center] = {}
@@ -162,17 +172,17 @@ def append_round(imgs, img, decimals=2):
     return np.concatenate((imgs, np.around(np.array(img), decimals)))
 
 
-def probs_hist(path_csvs=None, alt_title=None):
+def probs_hist(path_csvs=None, alt_title=None, centers=None):
+    centers = centers or DEFAULT_CENTERS
+
     for center in centers:
         imgs_smx_0_0, imgs_smx_0_1, imgs_smx_1_0, imgs_smx_1_1 = \
             np.array([]), np.array([]), np.array([]), np.array([])
 
-        center_path = os.path.join(os.path.abspath(path_csvs), f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
 
         for _, row in df.iterrows():
-            _, pred_wmh_softmax, _, gt_wmh, _, _, _ ,_ = row
+            _, pred_wmh_softmax, _, gt_wmh, _, _, _, _ = row
             print(f"Processing {pred_wmh_softmax}...")
 
             pred_softmax = nib.load(pred_wmh_softmax).get_fdata()
@@ -214,17 +224,17 @@ def probs_hist(path_csvs=None, alt_title=None):
     plt.show()
 
 
-def logits_hist(path_csvs=None, alt_title=None):
+def logits_hist(path_csvs=None, alt_title=None, centers=None):
+    centers = centers or DEFAULT_CENTERS
+
     for center in centers:
         imgs_logits_0_0, imgs_logits_0_1, imgs_logits_1_0, imgs_logits_1_1 = \
             np.array([]), np.array([]), np.array([]), np.array([])
 
-        center_path = os.path.join(os.path.abspath(path_csvs), f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
 
         for _, row in df.iterrows():
-            _, _, pred_logits, gt_wmh, _, _, _ ,_ = row
+            _, _, pred_logits, gt_wmh, _, _, _, _ = row
             print(f"Processing {pred_logits}...")
 
             pred_logits = nib.load(pred_logits).get_fdata()
@@ -270,19 +280,17 @@ def logits_hist(path_csvs=None, alt_title=None):
     plt.show()
 
 
+def ece_reliability(path_csvs=None, alt_title=None, centers=None):
+    centers = centers or DEFAULT_CENTERS
 
-def ece_reliability(path_csvs=None, alt_title=None):
     for center in centers:
-        center_path = os.path.join(os.path.abspath(path_csvs),
-                                  f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
 
         preds_1 = np.array([])
         gt_1 = np.array([], dtype=np.uint8)
 
         for i, row in df.iterrows():
-            _, pred_wmh_softmax, _, gt_wmh, _, _, _ ,_ = row
+            _, pred_wmh_softmax, _, gt_wmh, _, _, _, _ = row
 
             pred_softmax = get_array_from_nifti(pred_wmh_softmax)
             gt_wmh = get_array_from_nifti(gt_wmh)
@@ -317,7 +325,7 @@ def ece_reliability(path_csvs=None, alt_title=None):
     plt.show()
 
 
-def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain'):
+def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain', centers=None):
     """ Dice vs entropy plot
 
     Compute for each subject the dice score and the entropy of the softmax, and
@@ -328,17 +336,16 @@ def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain'):
     The y axis limits are 0-1 and the x axis its 0 to 0.2 more than the maximum
 
     """
+    centers = centers or DEFAULT_CENTERS
+
     plt.figure()
     for center in centers:
-        center_path = os.path.join(os.path.abspath(path_csvs),
-                                  f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
 
         dice_ent = {center: []}
 
         for i, row in df.iterrows():
-            pred_hard_path, pred_softmax_path, _, gt_path, _, _, _ ,_ = row
+            pred_hard_path, pred_softmax_path, _, gt_path, _, _, _, _ = row
             subj_path = os.path.dirname(pred_softmax_path)
 
             pred_hard = nib.load(pred_hard_path).get_fdata()
@@ -385,7 +392,8 @@ def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain'):
     plt.show()
 
 
-def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
+def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None,
+                             centers=None):
     """ Uncertainty by condition
 
     Plots inspired in: uncertainty_by_condition from https://github.com/SteffenCzolbe/probabilistic_segmentation  # noqa
@@ -393,12 +401,11 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
 
     :return:
     """
+    centers = centers or DEFAULT_CENTERS
+
     unc_cond = {}
     for center in centers:
-        center_path = os.path.join(os.path.abspath(path_csvs),
-                                  f"{center}.csv")
-        df = pd.read_csv(center_path, header=None)
-        df.columns = csv_cols
+        df = _load_center_csv(path_csvs, center)
 
         unc_cond[center] = {
             "TP": np.array([]),
@@ -408,7 +415,7 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
         }
 
         for i, row in df.iterrows():
-            pred_hard_path, pred_softmax_path, _, gt_path, _, _, _ ,_ = row
+            pred_hard_path, pred_softmax_path, _, gt_path, _, _, _, _ = row
 
             subj_path = os.path.dirname(pred_softmax_path)
 

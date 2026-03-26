@@ -5,7 +5,7 @@ import lightning as L
 import torchio as tio
 from torch.utils.data import DataLoader
 
-from src.datamodules.transforms import get_preprocessing
+from datamodules.transforms import get_preprocessing
 
 TRAINING = ['tr', 'train', 'training']
 VALIDATION = ['v', 'val', 'validation']
@@ -49,33 +49,37 @@ class WMHDataModule(L.LightningDataModule):
     :param predict_split: Split to use for prediction
     """
 
+    # Centers whose directory contains scanner-named sub-folders rather than
+    # subject folders directly.
+    CENTERS_WITH_SUBFOLDERS = ['Amsterdam']
+
     def __init__(self, data_dir: str, batch_size: int, centers: str,
                  split_ratios: list, patch_size: int = None, seed: int = 42,
                  tio_num_workers: int = None, samples_per_volume: int = None,
                  queue_length: int = None, predict_split: str = 'test'):
         super().__init__()
-        self.data_dir = os.path.expanduser(data_dir)  # Data directory
-        self.batch_size = batch_size  # Batch size
-        self.centers = centers  # Centers to use
-        self.train_ds = None  # Training dataset
-        self.split_ratios = split_ratios  # Ratios for training/validation/test
-        self.seed = seed  # Random seed
-        self.val_ds = None  # Validation dataset
-        self.test_ds = None  # Test dataset
-        self.subjects = None  # List of subjects
-        self.transforms = None  # Transforms to apply to the data
-        self.patch_size = (patch_size, patch_size, patch_size)  # Patch size
-        self.samples_per_volume = samples_per_volume  # Samples per volume
-        self.queue_length = queue_length  # Queue length
-        self.tio_num_workers = tio_num_workers  # TorchIO workers
+        self.data_dir = os.path.expanduser(data_dir)
+        self.batch_size = batch_size
+        self.centers = centers
+        self.train_ds = None
+        self.split_ratios = split_ratios
+        self.seed = seed
+        self.val_ds = None
+        self.test_ds = None
+        self.subjects = None
+        self.transforms = None
+        self.patch_size = (patch_size, patch_size, patch_size)
+        self.samples_per_volume = samples_per_volume
+        self.queue_length = queue_length
+        self.tio_num_workers = tio_num_workers
         self.ids = None
         self.label_name = 'wmh'
         self.label_probs = {0: 0.1, 1: 0.9}
-        self.centers_dict = None  # Dictionary with the centers
-        self.subj_train = None  # List of subjects for training
-        self.subj_val = None  # List of subjects for validation
-        self.subj_test = None  # List of subjects for testing
-        self.predict_split = predict_split  # Split to use for prediction
+        self.centers_dict = None
+        self.subj_train = None
+        self.subj_val = None
+        self.subj_test = None
+        self.predict_split = predict_split
 
     def get_centers_dict(self):
         """  Convert the centers string to a dictionary
@@ -103,7 +107,7 @@ class WMHDataModule(L.LightningDataModule):
         for split, ctrs in self.centers_dict.items():
             for ctr in ctrs:
                 ctr_path = os.path.join(self.data_dir, split, ctr)
-                if ctr == 'Amsterdam':  # It has 3 sub-folders
+                if ctr in self.CENTERS_WITH_SUBFOLDERS:
                     for f in os.listdir(ctr_path):
                         expl_folders.append(os.path.join(ctr_path, f))
                 else:
@@ -219,10 +223,11 @@ class WMHDataModule(L.LightningDataModule):
         self.subj_test = self.create_subjects(ts_sp)
 
     def setup(self, stage: str):
-        # Some subjects have also 2 as "other pathology". We remap it to 0
         self.transforms = get_preprocessing(include_labels=True)
 
         if stage == "fit":
+            # List * int duplicates subjects so the queue draws enough patches
+            # per epoch without exhausting the subject list prematurely.
             self.train_ds = tio.SubjectsDataset(
                 self.samples_per_volume * self.subj_train, self.transforms
             )

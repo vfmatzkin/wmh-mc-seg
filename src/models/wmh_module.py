@@ -2,7 +2,6 @@ import csv
 import os
 import shutil
 
-import SimpleITK as sitk
 import mlflow
 import lightning as L
 import torch
@@ -10,9 +9,13 @@ import torch.nn.functional as F
 import torchio as tio
 
 from losses.composite import RegularizedLoss
+from models.inference import (
+    forward_pass,
+    get_mc_preds,
+    save_predictions,
+)
 from models.unet3d import UNet3D
 from utils.metrics import compute_metrics
-from utils.sitk_io import restore_metadata_as_sitk
 
 
 class WMHModel(L.LightningModule):
@@ -89,123 +92,8 @@ class WMHModel(L.LightningModule):
             return [optimizer], [scheduler]
         return optimizer
 
-    def get_pred_folder(self, t1_path):
-        parent_folder = os.path.dirname(os.path.dirname(t1_path))
-        if self.output_dir is None:
-            pred_folder = parent_folder
-        else:
-            pred_folder = os.path.join(self.output_dir,
-                                       os.path.basename(parent_folder))
-        os.makedirs(pred_folder, exist_ok=True)
-        return pred_folder
-
-    def save_preds_tst(self, y_hat, y, logits, reference_imgs, is_test=False,
-                       lgs_mc_arr=None, sm_mc_arr=None):
-        """ Saves predictions to the disk
-
-        It expects full volume images, not patches.
-
-        :param y_hat: Softmax output
-        :param y: Ground truth
-        :param logits: Logits
-        :param reference_imgs: Paths to the T1 images
-        :param is_test: Whether the model is being tested or not
-        :param lgs_mc_arr: Logits array (for MC dropout)
-        :param sm_mc_arr: Softmax output array (for MC dropout)
-        """
-        if not is_test or (not self.save_preds and self.output_dir is None):
-            return None
-
-        for i, t1_path in enumerate(reference_imgs):  # For each img in batch
-            pred_folder = self.get_pred_folder(t1_path)
-            hard_pred = torch.argmax(y_hat[i], dim=0).to(torch.uint8)
-
-            lgs_mc_mean = lgs_mc_arr.mean(0) if lgs_mc_arr is not None else None
-            sftmx_mc_mean = sm_mc_arr.mean(0) if sm_mc_arr is not None else None
-            hard_pred_mc, uncert_mc = None, None
-            if sm_mc_arr is not None:
-                hard_pred_mc = torch.argmax(sftmx_mc_mean[0], 0).to(torch.uint8)
-                if self.mc_dropout_samples == 1:
-                    print('WARNING: MC dropout samples == 1, uncertainty '
-                          'estimation won\'t be computed')
-                uncert_mc = sm_mc_arr.std(0)[0] if self.mc_dropout_samples > 1 \
-                    else None  # First elem in batch + foreground ch on save
-
-            run_id = os.path.splitext(os.path.basename(self.model_path))[0]
-            imgs = {
-                f'pred_wmh_hard_{run_id}.nii.gz': hard_pred,
-                f'pred_wmh_softmax_{run_id}.nii.gz': y_hat[i],
-                f'pred_logits_{run_id}.nii.gz': logits[i],
-                f'gt_wmh_{run_id}.nii.gz':
-                    y[i, 1].to(torch.uint8) if y is not None else None,
-            }
-
-            if lgs_mc_arr.shape[0]:  # If there's any MC imgs to save
-                imgs.update({
-                    f'pred_mc_logitsmean_{run_id}.nii.gz': lgs_mc_mean[0],
-                    f'pred_mc_softmaxmean_{run_id}.nii.gz': sftmx_mc_mean[0],
-                    f'pred_mc_hardmean_{run_id}.nii.gz': hard_pred_mc,
-                })
-
-            if uncert_mc is not None:  # If there's any MC imgs to save and > 1
-                imgs.update({
-                    f'pred_mc_uncertmc_{run_id}.nii.gz': uncert_mc[1]
-                })
-
-            paths = []
-            for img_name, img in imgs.items():
-                paths.append(os.path.join(pred_folder, img_name))
-                if img is not None:
-                    im_o_sp = restore_metadata_as_sitk(img, t1_path)
-                    sitk.WriteImage(im_o_sp, paths[-1])
-            self.saved_preds.append(paths)
-            print(f'saved preds for {pred_folder}')
-
     def forward_pass(self, x, batch, is_test=False):
-        if not is_test or self.patch_size is None:
-            return self.net(x)
-        else:
-            return self.patch_inference(x, batch)
-
-    def patch_inference(self, x, batch):
-        out_tensor = torch.empty((0, x.shape[1], x.shape[2], x.shape[3],
-                                  x.shape[4]))
-        for i_subj in range(x.shape[0]):
-            if 'wmh' in batch:
-                subject = tio.Subject(
-                    t1=tio.ScalarImage(tensor=batch['t1']['data'][i_subj]),
-                    flair=tio.ScalarImage(
-                        tensor=batch['flair']['data'][i_subj]
-                    ),
-                    wmh=tio.LabelMap(tensor=batch['wmh']['data'][i_subj]))
-            grid_sampler = tio.inference.GridSampler(
-                subject,
-                self.patch_size,
-                4,
-            )
-            patch_loader = torch.utils.data.DataLoader(
-                grid_sampler,
-                batch_size=1,
-            )
-            aggregator = tio.inference.GridAggregator(grid_sampler)
-            with torch.no_grad():
-                for patches_batch in patch_loader:
-                    xc1 = patches_batch['t1'][tio.DATA]
-                    xc2 = patches_batch['flair'][tio.DATA]
-
-                    # Concatenate the input images along the channel dimension
-                    x = torch.cat((xc1, xc2), dim=1)
-
-                    locations = patches_batch[tio.LOCATION]
-
-                    logits = self.net(x)
-                    aggregator.add_batch(logits, locations)
-            output_tensor = aggregator.get_output_tensor()
-            # Append it to the out_tensor in the first channel (batch)
-            # out_tensor is a 5D tensor (batch, channels, x, y, z)
-            # and output_tensor is a 4D tensor (channels, x, y, z)
-            out_tensor = torch.cat((out_tensor, output_tensor.unsqueeze(0)))
-        return out_tensor
+        return forward_pass(self.net, x, batch, is_test, self.patch_size)
 
     def infer_batch(self, batch, is_test=False):
         xc1 = batch['t1'][tio.DATA]
@@ -232,44 +120,30 @@ class WMHModel(L.LightningModule):
         x = torch.cat((xc1, xc2), dim=1)
 
         # Get MC dropout predictions if it applies (logits and softmax)
-        lgs_mc_arr, sm_mc_arr = self.get_mc_preds(x, batch, is_test)
+        lgs_mc_arr, sm_mc_arr = get_mc_preds(
+            self.net, x, batch, self.mc_dropout_ratio, self.mc_dropout_samples,
+            self.patch_size, is_test,
+        )
 
         # Forward pass
         logits = self.forward_pass(x, batch, is_test)
         y_hat = F.softmax(logits, dim=1)
 
         # Save predictions if it applies
-        self.save_preds_tst(y_hat, y, logits, t1_paths, is_test, lgs_mc_arr,
-                            sm_mc_arr)
+        saved = save_predictions(
+            y_hat, y, logits, t1_paths,
+            model_path=self.model_path,
+            output_dir=self.output_dir,
+            save_preds=self.save_preds,
+            mc_dropout_samples=self.mc_dropout_samples,
+            is_test=is_test,
+            lgs_mc_arr=lgs_mc_arr,
+            sm_mc_arr=sm_mc_arr,
+        )
+        if saved:
+            self.saved_preds.extend(saved)
+
         return y_hat, y, centers  # Return preds, gt and centers
-
-    def get_mc_preds(self, x, batch, is_test):
-        # For MC dropout:
-        mc_cond = self.mc_dropout_ratio > 0 and is_test
-        if mc_cond:
-            model_was_eval = not self.net.training
-            self.net.train()
-
-        # If no MC dropout -> return empty arrays
-        mc_fwd_passes = self.mc_dropout_samples if mc_cond else 0
-        logits_arr = torch.empty((mc_fwd_passes, x.shape[0], 2, x.shape[2],
-                                  x.shape[3], x.shape[4]))
-        y_hat_arr = torch.empty((mc_fwd_passes, x.shape[0], 2, x.shape[2],
-                                 x.shape[3], x.shape[4]))
-
-        # MC forward passes
-        for i in range(mc_fwd_passes):
-            print(f'  - MC dropout: forward pass {i + 1}/{mc_fwd_passes}')
-            logits_mc = self.forward_pass(x, batch, is_test)
-            y_hat_mc = F.softmax(logits_mc, dim=1)
-            logits_arr[i] = logits_mc
-            y_hat_arr[i] = y_hat_mc
-
-        # Restore the model to its original state
-        if mc_cond and model_was_eval:
-            self.net.eval()
-
-        return logits_arr, y_hat_arr
 
     def _log_losses(self, losses, stage):
         epoch = self.current_epoch

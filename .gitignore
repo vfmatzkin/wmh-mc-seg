@@ -67,3 +67,13 @@ poetry.lock
 notebooks/training_*
 
 local/
+
+# Generated figures and data at repo root
+Figure*.png
+Figure*.pdf
+*.pkl
+*.csv
+!requirements.txt
+pdfs/
+text.txt
+.atl/

@@ -35,6 +35,7 @@ dev = [
     "scikit-learn>=1.2",
     "uncertainty-calibration",
     "shap>=0.41",
+    "pytest>=7.0",
 ]
 
 [tool.ruff]
