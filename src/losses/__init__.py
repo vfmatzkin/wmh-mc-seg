@@ -1,3 +1,3 @@
-from .composite import RegularizedLoss, CLI_ALIASES
+from .composite import CLI_ALIASES, RegularizedLoss
 
-__all__ = ['RegularizedLoss', 'CLI_ALIASES']
+__all__ = ["RegularizedLoss", "CLI_ALIASES"]

@@ -34,14 +34,18 @@ def run():
 
 
 def run_inference(
-    t1_path: Path, flair_path: Path, output_dir: Path,
+    t1_path: Path,
+    flair_path: Path,
+    output_dir: Path,
     checkpoint: str = "checkpoints/training_Utrecht_best.ckpt",
-    mc_samples: int = 10, mc_ratio: float = 0.2,
+    mc_samples: int = 10,
+    mc_ratio: float = 0.2,
 ) -> dict:
     """Run WMH segmentation with uncertainty estimation."""
-    from src.model import WMHModel, UNet3D
     import torchio as tio
+
     from src.datamodules.transforms import get_preprocessing
+    from src.model import UNet3D, WMHModel
 
     device = _get_device()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +87,12 @@ def run_inference(
     ref_img = sitk.ReadImage(str(t1_path))
     outputs = {}
 
-    for name, arr in [("wmh_mask", hard_pred), ("wmh_prob", mean_pred), ("wmh_uncertainty", uncertainty)]:
+    output_arrays = [
+        ("wmh_mask", hard_pred),
+        ("wmh_prob", mean_pred),
+        ("wmh_uncertainty", uncertainty),
+    ]
+    for name, arr in output_arrays:
         img = sitk.GetImageFromArray(arr.astype(np.float32))
         img.CopyInformation(ref_img)
         path = output_dir / f"{name}.nii.gz"
@@ -96,7 +105,9 @@ def run_inference(
     outputs["measurements"] = {
         "wmh_volume_mm3": round(wmh_voxels * voxel_vol, 1),
         "wmh_voxels": wmh_voxels,
-        "mean_uncertainty": round(float(uncertainty[hard_pred > 0].mean()), 4) if wmh_voxels > 0 else 0,
+        "mean_uncertainty": (
+            round(float(uncertainty[hard_pred > 0].mean()), 4) if wmh_voxels > 0 else 0
+        ),
         "mc_samples": mc_samples,
     }
     print(f"  WMH volume: {outputs['measurements']['wmh_volume_mm3']} mm³")
@@ -121,7 +132,8 @@ def _write_result(out_dir: Path, status: str, outputs=None, error=None):
     if outputs:
         result["outputs"] = [
             {"type": k, "file": Path(v).name}
-            for k, v in outputs.items() if isinstance(v, str) and Path(v).exists()
+            for k, v in outputs.items()
+            if isinstance(v, str) and Path(v).exists()
         ]
         if "measurements" in outputs:
             result["measurements"] = outputs["measurements"]

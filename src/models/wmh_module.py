@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import csv
 import os
 import shutil
+from typing import Any
 
-import mlflow
 import lightning as L
+import mlflow
 import torch
 import torch.nn.functional as F
 import torchio as tio
@@ -19,7 +22,7 @@ from utils.metrics import compute_metrics
 
 
 class WMHModel(L.LightningModule):
-    """ WMHModel
+    """WMHModel
 
     This class implements the WMH segmentation model. It is a subclass of the
     LightningModule class from PyTorch Lightning. This class is used to train
@@ -34,16 +37,29 @@ class WMHModel(L.LightningModule):
     :param reduce_on_epoch: Reduce the learning rate every N epochs.
     """
 
-    def __init__(self, net, criterion, learning_rate, optimizer_class,
-                 weight_decay=0, lambda_lr=None, reduce_on_epoch=None,
-                 reg_start=0, reg_lambda=0.3, best_model_path=None,
-                 ood_centers=None, **kwargs):
+    def __init__(
+        self,
+        net: torch.nn.Module,
+        criterion: str,
+        learning_rate: float,
+        optimizer_class: type[torch.optim.Optimizer],
+        weight_decay: float = 0,
+        lambda_lr: float | None = None,
+        reduce_on_epoch: int | None = None,
+        reg_start: int = 0,
+        reg_lambda: float = 0.3,
+        best_model_path: str | None = None,
+        ood_centers: list[str] | str | None = None,
+        **kwargs: Any,
+    ):
         super().__init__()
 
         self.lr = learning_rate
         self.net = net
         self.criterion, self.custom_loss = RegularizedLoss.from_cli(
-            criterion, reg_lambda=reg_lambda, start_epoch=reg_start,
+            criterion,
+            reg_lambda=reg_lambda,
+            start_epoch=reg_start,
             ood_centers=ood_centers,
         )
         self.optimizer_class = optimizer_class
@@ -57,21 +73,27 @@ class WMHModel(L.LightningModule):
 
         # Test-related parameters
         self.model_path = None
-        self.save_preds = kwargs.get('save_predictions', False)
-        self.output_dir = kwargs.get('output_dir', None)
+        self.save_preds = kwargs.get("save_predictions", False)
+        self.output_dir = kwargs.get("output_dir", None)
         self.saved_preds = []
-        self.patch_size = kwargs.get('patch_size', None)
-        self.mc_dropout_ratio = kwargs.get('mc_dropout_ratio', 0.0)
-        self.mc_dropout_samples = kwargs.get('mc_dropout_samples', 0)
+        self.patch_size = kwargs.get("patch_size", None)
+        self.mc_dropout_ratio = kwargs.get("mc_dropout_ratio", 0.0)
+        self.mc_dropout_samples = kwargs.get("mc_dropout_samples", 0)
 
-        self.save_hyperparameters(ignore=['net'])
+        self.save_hyperparameters(ignore=["net"])
 
     @classmethod
-    def load_test(cls, model_path, save_predictions, output_dir, patch_size,
-                  mc_dropout_ratio, mc_dropout_samples):
+    def load_test(
+        cls,
+        model_path: str,
+        save_predictions: bool,
+        output_dir: str | None,
+        patch_size: int | None,
+        mc_dropout_ratio: float,
+        mc_dropout_samples: int,
+    ) -> WMHModel:
         model_path = os.path.expanduser(model_path)
-        obj = WMHModel.load_from_checkpoint(model_path,
-                                            net=UNet3D(mc_dropout_ratio))
+        obj = WMHModel.load_from_checkpoint(model_path, net=UNet3D(mc_dropout_ratio))
         obj.model_path = os.path.abspath(model_path)
         obj.save_preds = save_predictions
         obj.output_dir = output_dir
@@ -82,38 +104,48 @@ class WMHModel(L.LightningModule):
         return obj
 
     def configure_optimizers(self):
-        optimizer = self.optimizer_class(self.parameters(), lr=self.lr,
-                                         weight_decay=self.weight_decay)
+        optimizer = self.optimizer_class(
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
         if self.lambda_lr is not None and self.reduce_on_epoch is not None:
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 optimizer,
-                lr_lambda=lambda epoch: self.lambda_lr ** (
-                        epoch // self.reduce_on_epoch),
+                lr_lambda=lambda epoch: self.lambda_lr ** (epoch // self.reduce_on_epoch),
             )
             return [optimizer], [scheduler]
         return optimizer
 
-    def forward_pass(self, x, batch, is_test=False):
+    def forward_pass(
+        self,
+        x: torch.Tensor,
+        batch: dict,
+        is_test: bool = False,
+    ) -> torch.Tensor:
         return forward_pass(self.net, x, batch, is_test, self.patch_size)
 
-    def infer_batch(self, batch, is_test=False):
-        xc1 = batch['t1'][tio.DATA]
-        xc2 = batch['flair'][tio.DATA]
-        t1_paths = batch['t1'][tio.PATH]
-        y = batch['wmh'][tio.DATA] if 'wmh' in batch else None
+    def infer_batch(
+        self,
+        batch: dict,
+        is_test: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, list[str]]:
+        xc1 = batch["t1"][tio.DATA]
+        xc2 = batch["flair"][tio.DATA]
+        t1_paths = batch["t1"][tio.PATH]
+        y = batch["wmh"][tio.DATA] if "wmh" in batch else None
 
         base_folder = os.path.commonprefix(t1_paths)
         centers = []
 
         # If all the images are from the same center, remove the center from the
         # base folder
-        if not any(spl in os.path.split(base_folder.rstrip('/'))[1]
-                   for spl in ['training', 'test']):
-            base_folder = os.path.split(base_folder.rstrip('/'))[0]
+        if not any(
+            spl in os.path.split(base_folder.rstrip("/"))[1] for spl in ["training", "test"]
+        ):
+            base_folder = os.path.split(base_folder.rstrip("/"))[0]
 
         for file_path in t1_paths:
-            relative_path = file_path.replace(base_folder, '').lstrip('/')
-            path_parts = relative_path.split('/')
+            relative_path = file_path.replace(base_folder, "").lstrip("/")
+            path_parts = relative_path.split("/")
             center_part = path_parts[0]
             centers.append(center_part)
 
@@ -122,8 +154,13 @@ class WMHModel(L.LightningModule):
 
         # Get MC dropout predictions if it applies (logits and softmax)
         lgs_mc_arr, sm_mc_arr = get_mc_preds(
-            self.net, x, batch, self.mc_dropout_ratio, self.mc_dropout_samples,
-            self.patch_size, is_test,
+            self.net,
+            x,
+            batch,
+            self.mc_dropout_ratio,
+            self.mc_dropout_samples,
+            self.patch_size,
+            is_test,
         )
 
         # Forward pass
@@ -132,7 +169,10 @@ class WMHModel(L.LightningModule):
 
         # Save predictions if it applies
         saved = save_predictions(
-            y_hat, y, logits, t1_paths,
+            y_hat,
+            y,
+            logits,
+            t1_paths,
             model_path=self.model_path,
             output_dir=self.output_dir,
             save_preds=self.save_preds,
@@ -146,58 +186,68 @@ class WMHModel(L.LightningModule):
 
         return y_hat, y, centers  # Return preds, gt and centers
 
-    def _log_losses(self, losses, stage):
+    def _log_losses(
+        self,
+        losses: torch.Tensor | dict[str, torch.Tensor],
+        stage: str,
+    ) -> torch.Tensor:
         epoch = self.current_epoch
         loss = 0
         if isinstance(losses, dict):
             for key in losses:
-                self.log(f'{stage}_{key}', losses[key], prog_bar=True,
-                         on_step=True, on_epoch=True)
-                mlflow.log_metric(f'{stage}_{key}', losses[key], epoch)
+                self.log(f"{stage}_{key}", losses[key], prog_bar=True, on_step=True, on_epoch=True)
+                mlflow.log_metric(f"{stage}_{key}", losses[key], epoch)
                 loss += losses[key]
         else:
             loss = losses
         return loss
 
-    def _shared_step(self, batch, batch_idx, stage):
+    def _shared_step(self, batch: dict, batch_idx: int, stage: str) -> torch.Tensor:
         y_hat, y, centers = self.infer_batch(batch)
-        losses = self.criterion(y_hat, y, self.current_epoch, centers=centers) \
-            if self.custom_loss else self.criterion(y_hat, y)
-        metrics = compute_metrics(y_hat, y, text=f'{stage}_')
+        losses = (
+            self.criterion(y_hat, y, self.current_epoch, centers=centers)
+            if self.custom_loss
+            else self.criterion(y_hat, y)
+        )
+        metrics = compute_metrics(y_hat, y, text=f"{stage}_")
         loss = self._log_losses(losses, stage)
-        self.log(f'{stage}_loss', loss, prog_bar=True, on_step=True,
-                 on_epoch=True)
+        self.log(f"{stage}_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log_dict(metrics, on_step=True, on_epoch=True)
         return loss
 
-    def training_step(self, batch, batch_idx):
-        return self._shared_step(batch, batch_idx, 'train')
+    def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
+        return self._shared_step(batch, batch_idx, "train")
 
-    def validation_step(self, batch, batch_idx):
-        return self._shared_step(batch, batch_idx, 'val')
+    def validation_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
+        return self._shared_step(batch, batch_idx, "val")
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch: dict, batch_idx: int) -> None:
         self.infer_batch(batch, is_test=True)
 
     def on_train_epoch_end(self):  # Todo change filtering _epoch
         metr, ce = self.trainer.callback_metrics, self.current_epoch
-        if 'train_loss_epoch' in metr:
-            mlflow.log_metric('train_loss', metr['train_loss_epoch'].item(), ce)
-        if 'train_dice_epoch' in metr:
-            mlflow.log_metric('train_dice', metr['train_dice_epoch'].item(), ce)
+        if "train_loss_epoch" in metr:
+            mlflow.log_metric("train_loss", metr["train_loss_epoch"].item(), ce)
+        if "train_dice_epoch" in metr:
+            mlflow.log_metric("train_dice", metr["train_dice_epoch"].item(), ce)
 
     def on_validation_epoch_end(self):
         metr, ce = self.trainer.callback_metrics, self.current_epoch
-        if 'val_loss_epoch' in metr:
-            mlflow.log_metric('val_loss', metr['val_loss_epoch'].item(), ce)
-        if 'val_dice_epoch' in metr:
-            mlflow.log_metric('val_dice', metr['val_dice_epoch'].item(), ce)
+        if "val_loss_epoch" in metr:
+            mlflow.log_metric("val_loss", metr["val_loss_epoch"].item(), ce)
+        if "val_dice_epoch" in metr:
+            mlflow.log_metric("val_dice", metr["val_dice_epoch"].item(), ce)
         best_chk_path = self.trainer.checkpoint_callback.best_model_path
-        if best_chk_path != '' and self.best_model_path is not None:
+        if best_chk_path != "" and self.best_model_path is not None:
             shutil.copy(best_chk_path, self.best_model_path)
 
-    def save_preds_info(self, preds_info_path, model_path, force_save=False):
-        """ Saves the paths to the saved predictions
+    def save_preds_info(
+        self,
+        preds_info_path: str | None,
+        model_path: str,
+        force_save: bool = False,
+    ) -> None:
+        """Saves the paths to the saved predictions
 
         :param preds_info_path: Path to the file where the paths will be saved
         :param model_path: Path to the model checkpoint
@@ -205,18 +255,19 @@ class WMHModel(L.LightningModule):
         preds_info_path is None
         """
         if preds_info_path is None and force_save:
-            folder_name = '_'.join(
-                os.path.basename(model_path).split('_')[0:-1])
-            file_name = os.path.basename(model_path).replace('.ckpt', '.csv')
-            preds_info_path = os.path.join(os.getcwd(), 'notebooks',
-                                           folder_name, file_name)
+            folder_name = "_".join(os.path.basename(model_path).split("_")[0:-1])
+            file_name = os.path.basename(model_path).replace(".ckpt", ".csv")
+            preds_info_path = os.path.join(os.getcwd(), "notebooks", folder_name, file_name)
         elif preds_info_path is None:  # Not saving predictions csv by default
             return None
 
         preds_info_path = os.path.abspath(os.path.expanduser(preds_info_path))
         os.makedirs(os.path.dirname(preds_info_path), exist_ok=True)
 
-        with open(preds_info_path, 'w', ) as f:
+        with open(
+            preds_info_path,
+            "w",
+        ) as f:
             writer = csv.writer(f)
             writer.writerows(self.saved_preds)
-        print(f'Predictions info saved to {preds_info_path}')
+        print(f"Predictions info saved to {preds_info_path}")

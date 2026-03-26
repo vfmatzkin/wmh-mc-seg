@@ -38,6 +38,11 @@ dev = [
     "pytest>=7.0",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: end-to-end pipeline tests using synthetic data (no real dataset needed)",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import random
 
@@ -7,13 +9,13 @@ from torch.utils.data import DataLoader
 
 from datamodules.transforms import get_preprocessing
 
-TRAINING = ['tr', 'train', 'training']
-VALIDATION = ['v', 'val', 'validation']
-TEST = ['te', 'test', 'testing']
+TRAINING = ["tr", "train", "training"]
+VALIDATION = ["v", "val", "validation"]
+TEST = ["te", "test", "testing"]
 
 
 class MySubject(tio.Subject):
-    """ MySubject class
+    """MySubject class
 
     If the tolerance value is too small and the different images from the same
     subject have slightly different values, TorchIO won't accept the images.
@@ -21,13 +23,13 @@ class MySubject(tio.Subject):
     """
 
     def check_consistent_attribute(self, *args, **kwargs) -> None:
-        kwargs['relative_tolerance'] = 1e-5
-        kwargs['absolute_tolerance'] = 1e-5
+        kwargs["relative_tolerance"] = 1e-5
+        kwargs["absolute_tolerance"] = 1e-5
         return super().check_consistent_attribute(*args, **kwargs)
 
 
 class WMHDataModule(L.LightningDataModule):
-    """ WMHDataModule
+    """WMHDataModule
 
     This class is used to load the WMH dataset and prepare the data for
     training/testing.
@@ -51,12 +53,21 @@ class WMHDataModule(L.LightningDataModule):
 
     # Centers whose directory contains scanner-named sub-folders rather than
     # subject folders directly.
-    CENTERS_WITH_SUBFOLDERS = ['Amsterdam']
+    CENTERS_WITH_SUBFOLDERS = ["Amsterdam"]
 
-    def __init__(self, data_dir: str, batch_size: int, centers: str,
-                 split_ratios: list, patch_size: int = None, seed: int = 42,
-                 tio_num_workers: int = None, samples_per_volume: int = None,
-                 queue_length: int = None, predict_split: str = 'test'):
+    def __init__(
+        self,
+        data_dir: str,
+        batch_size: int,
+        centers: str,
+        split_ratios: list[float],
+        patch_size: int | None = None,
+        seed: int = 42,
+        tio_num_workers: int | None = None,
+        samples_per_volume: int | None = None,
+        queue_length: int | None = None,
+        predict_split: str = "test",
+    ):
         super().__init__()
         self.data_dir = os.path.expanduser(data_dir)
         self.batch_size = batch_size
@@ -73,7 +84,7 @@ class WMHDataModule(L.LightningDataModule):
         self.queue_length = queue_length
         self.tio_num_workers = tio_num_workers
         self.ids = None
-        self.label_name = 'wmh'
+        self.label_name = "wmh"
         self.label_probs = {0: 0.1, 1: 0.9}
         self.centers_dict = None
         self.subj_train = None
@@ -81,8 +92,8 @@ class WMHDataModule(L.LightningDataModule):
         self.subj_test = None
         self.predict_split = predict_split
 
-    def get_centers_dict(self):
-        """  Convert the centers string to a dictionary
+    def get_centers_dict(self) -> dict[str, list[str]]:
+        """Convert the centers string to a dictionary
 
         Example: "phase1:cent1;phase2:cent2" -> {"phase1": "cent1",
         "phase2": "cent2"}
@@ -90,13 +101,12 @@ class WMHDataModule(L.LightningDataModule):
         :return: Dictionary with the centers
         """
         self.centers_dict = {
-            k: v.split(',') for k, v in
-            [c.split(':') for c in self.centers.split(';')]
+            k: v.split(",") for k, v in [c.split(":") for c in self.centers.split(";")]
         }
         return self.centers_dict
 
-    def get_expl_folders(self):
-        """ Get the list of folders with the data from the centers dictionary
+    def get_expl_folders(self) -> list[str]:
+        """Get the list of folders with the data from the centers dictionary
 
         Use the centers dictionary to get the list of folders with the data. The
          folders are returned in a list.
@@ -114,8 +124,14 @@ class WMHDataModule(L.LightningDataModule):
                     expl_folders.append(ctr_path)
         return expl_folders
 
-    def split_aux(self, aux_train_imgs, tr_im, val_im, tst_im):
-        """ Split the list of images into train, validation, and test sets
+    def split_aux(
+        self,
+        aux_train_imgs: list,
+        tr_im: list,
+        val_im: list,
+        tst_im: list,
+    ) -> None:
+        """Split the list of images into train, validation, and test sets
 
         Using the split ratios, split the list of images into train, validation,
         and test sets. The sets are returned in the lists passed by reference.
@@ -138,16 +154,16 @@ class WMHDataModule(L.LightningDataModule):
 
         # Split the shuffled list into train, validation, and test sets
         train_set = aux_train_imgs[:n_train]
-        val_set = aux_train_imgs[n_train:n_train + n_val]
-        test_set = aux_train_imgs[n_train + n_val:]
+        val_set = aux_train_imgs[n_train : n_train + n_val]
+        test_set = aux_train_imgs[n_train + n_val :]
 
         # Assign the sets to the output lists passed by reference
         tr_im.extend(train_set)
         val_im.extend(val_set)
         tst_im.extend(test_set)
 
-    def generate_splits(self):
-        """ Generate the splits for training, validation, and test sets
+    def generate_splits(self) -> tuple[list, list, list]:
+        """Generate the splits for training, validation, and test sets
 
         Generate the splits for training, validation, and test sets. The splits
         are generated using the centers dictionary.
@@ -166,28 +182,36 @@ class WMHDataModule(L.LightningDataModule):
             aux_train_imgs = []
             for subj in os.listdir(spl_ctr_fld):
                 subj_path = os.path.join(spl_ctr_fld, subj)
-                if 'training' in spl_ctr_fld.split(os.path.sep)[-3:-1]:
-                    aux_train_imgs.append([
-                        os.path.join(subj_path, 'pre', 'T1.nii.gz'),
-                        os.path.join(subj_path, 'pre', 'FLAIR.nii.gz'),
-                        os.path.join(subj_path, 'wmh.nii.gz')
-                    ])
+                if "training" in spl_ctr_fld.split(os.path.sep)[-3:-1]:
+                    aux_train_imgs.append(
+                        [
+                            os.path.join(subj_path, "pre", "T1.nii.gz"),
+                            os.path.join(subj_path, "pre", "FLAIR.nii.gz"),
+                            os.path.join(subj_path, "wmh.nii.gz"),
+                        ]
+                    )
                 else:
-                    tst_im.append([
-                        os.path.join(subj_path, 'pre', 'T1.nii.gz'),
-                        os.path.join(subj_path, 'pre', 'FLAIR.nii.gz')
-                    ])
+                    tst_im.append(
+                        [
+                            os.path.join(subj_path, "pre", "T1.nii.gz"),
+                            os.path.join(subj_path, "pre", "FLAIR.nii.gz"),
+                        ]
+                    )
             self.split_aux(aux_train_imgs, tr_im, val_im, tst_im)
 
         if self.predict_split:  # Allow to predict on train/val/test splits
-            tst_im = tr_im if self.predict_split in TRAINING \
-                else val_im if self.predict_split in VALIDATION \
-                else tst_im  # Default case (do nothing)
+            tst_im = (
+                tr_im
+                if self.predict_split in TRAINING
+                else val_im
+                if self.predict_split in VALIDATION
+                else tst_im
+            )  # Default case (do nothing)
 
         return tr_im, val_im, tst_im
 
-    def create_subjects(self, split):
-        """ Create the subjects for the TorchIO dataset
+    def create_subjects(self, split: list) -> list[tio.Subject]:
+        """Create the subjects for the TorchIO dataset
 
         From a list of lists with the paths to the images and labels, create the
         subjects for the TorchIO dataset.
@@ -200,20 +224,15 @@ class WMHDataModule(L.LightningDataModule):
         for im in split:
             if len(im) == 3:
                 subject = MySubject(
-                    t1=tio.ScalarImage(im[0]),
-                    flair=tio.ScalarImage(im[1]),
-                    wmh=tio.LabelMap(im[2])
+                    t1=tio.ScalarImage(im[0]), flair=tio.ScalarImage(im[1]), wmh=tio.LabelMap(im[2])
                 )
             else:
-                subject = MySubject(
-                    t1=tio.ScalarImage(im[0]),
-                    flair=tio.ScalarImage(im[1])
-                )
+                subject = MySubject(t1=tio.ScalarImage(im[0]), flair=tio.ScalarImage(im[1]))
             subjects.append(subject)
         return subjects
 
     def prepare_data(self):
-        """ Prepare the data
+        """Prepare the data
 
         Get the paths to the images and labels and create the TorchIO dataset.
         """
@@ -236,16 +255,13 @@ class WMHDataModule(L.LightningDataModule):
             )
         if stage == "test":
             if self.split_ratios[2] == 0:
-                print(f'W: Test split ratio is 0. Will predict on all data '
-                      f'({self.centers}).')
-                self.subj_test = self.subj_train + self.subj_val + \
-                                 self.subj_test
+                print(f"W: Test split ratio is 0. Will predict on all data ({self.centers}).")
+                self.subj_test = self.subj_train + self.subj_val + self.subj_test
 
-            self.test_ds = tio.SubjectsDataset(self.subj_test,
-                                               self.transforms)
+            self.test_ds = tio.SubjectsDataset(self.subj_test, self.transforms)
 
-    def get_dataloader(self, dataset, test=False):
-        """ Get the dataloader for the dataset
+    def get_dataloader(self, dataset: tio.SubjectsDataset, test: bool = False) -> DataLoader:
+        """Get the dataloader for the dataset
 
         Get the dataloader for the dataset. If the patch size is not specified,
         the dataloader will return full volume images. Otherwise, it will return
@@ -261,9 +277,7 @@ class WMHDataModule(L.LightningDataModule):
         if not any(self.patch_size) or test:
             return DataLoader(dataset, self.batch_size)  # Full volume
         else:
-            sampler = tio.data.LabelSampler(self.patch_size,
-                                            self.label_name,
-                                            self.label_probs)
+            sampler = tio.data.LabelSampler(self.patch_size, self.label_name, self.label_probs)
             patches_queue = tio.Queue(
                 dataset,
                 self.queue_length,

@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import SimpleITK as sitk
+import torch
 
 
-def restore_metadata_as_sitk(img, source_img):
-    """ Restore the metadata from the source image
+def restore_metadata_as_sitk(
+    img: torch.Tensor,
+    source_img: str | sitk.Image,
+) -> sitk.Image:
+    """Restore the metadata from the source image
 
     Given an image, and a source image path, load the source image and copy the
     metadata to the images in the dictionary.
@@ -15,8 +21,7 @@ def restore_metadata_as_sitk(img, source_img):
     :return: Image with restored metadata as SimpleITK image
     """
     shape = img.shape
-    source_img = sitk.ReadImage(source_img) if isinstance(source_img, str) \
-        else source_img
+    source_img = sitk.ReadImage(source_img) if isinstance(source_img, str) else source_img
     if len(shape) == 4:
         img_slices = []
         for i in range(shape[0]):
@@ -28,8 +33,8 @@ def restore_metadata_as_sitk(img, source_img):
         img = sitk.Flip(img, [True, True, False])  # flip the first axis
         if img.GetSize() != source_img.GetSize():
             sz = source_img.GetSize()
-            img = img[0:sz[0], 0:sz[1], 0:sz[2]]
+            img = img[0 : sz[0], 0 : sz[1], 0 : sz[2]]
         img.CopyInformation(source_img)
     else:
-        raise ValueError('Image dimension not supported')
+        raise ValueError("Image dimension not supported")
     return img

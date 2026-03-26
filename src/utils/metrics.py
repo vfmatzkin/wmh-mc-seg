@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
 from monai.metrics import compute_dice as dice
 
 
-def compute_metrics(y_hat, y, text=''):
-    """ Computes the metrics
+def compute_metrics(
+    y_hat: torch.Tensor,
+    y: torch.Tensor,
+    text: str = "",
+) -> dict[str, float]:
+    """Computes the metrics
 
     This function computes the metrics that are used to evaluate the model
     while training.
@@ -24,6 +30,6 @@ def compute_metrics(y_hat, y, text=''):
     dice_score = torch.mean(dice(y_hat_perm, y_perm, ignore_empty=False))
 
     # Construct the result dictionary
-    result = {text + 'dice': float(dice_score)}
+    result = {text + "dice": float(dice_score)}
 
     return result

@@ -1,15 +1,15 @@
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import torchio as tio
 
 # Import transforms directly to avoid src/datamodules/__init__.py pulling in
 # WMHDataModule → lightning (a heavy dep not needed for this test).
-_transforms_path = Path(__file__).parent.parent / 'src' / 'datamodules' / 'transforms.py'
-_spec = importlib.util.spec_from_file_location('datamodules.transforms', _transforms_path)
+_transforms_path = Path(__file__).parent.parent / "src" / "datamodules" / "transforms.py"
+_spec = importlib.util.spec_from_file_location("datamodules.transforms", _transforms_path)
 _mod = importlib.util.module_from_spec(_spec)
-sys.modules['datamodules.transforms'] = _mod
+sys.modules["datamodules.transforms"] = _mod
 _spec.loader.exec_module(_mod)
 get_preprocessing = _mod.get_preprocessing
 

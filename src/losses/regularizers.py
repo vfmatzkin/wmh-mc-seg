@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
 
@@ -12,40 +14,46 @@ class Regularizers:
     is created on the correct device at call time.
     """
 
-    def __init__(self, epsilon=1e-5, type='MEEP'):
+    def __init__(self, epsilon: float = 1e-5, type: str = "MEEP"):
         self.epsilon = epsilon  # plain float, device-agnostic
         self.type = type
 
-    def __call__(self, y_pred, y_true, mask_ood=None, clamp_preds=True):
+    def __call__(
+        self,
+        y_pred: torch.Tensor,
+        y_true: torch.Tensor,
+        mask_ood: torch.Tensor | None = None,
+        clamp_preds: bool = True,
+    ) -> torch.Tensor:
         y_pred_lm = torch.argmax(y_pred, dim=1)
 
         eps = torch.tensor(self.epsilon, device=y_pred.device)
         y_pred_c = torch.clamp(y_pred, eps, 1.0 - eps) if clamp_preds else y_pred
 
-        if self.type in ['MEEP', 'KL', 'MEALL']:
+        if self.type in ["MEEP", "KL", "MEALL"]:
             y_true_lm = torch.argmax(y_true, dim=1)
             misclassified_pixels = torch.not_equal(y_pred_lm, y_true_lm).float()
-            if self.type == 'MEEP':
-                reg = torch.mean(
-                    F.binary_cross_entropy(y_pred_c, y_pred_c, reduction="none"),
-                    dim=1) * misclassified_pixels
+            if self.type == "MEEP":
+                reg = (
+                    torch.mean(F.binary_cross_entropy(y_pred_c, y_pred_c, reduction="none"), dim=1)
+                    * misclassified_pixels
+                )
                 reg = torch.sum(reg) / torch.sum(misclassified_pixels)
-            if self.type == 'MEALL':
+            if self.type == "MEALL":
                 reg = torch.mean(
-                    F.binary_cross_entropy(y_pred_c, y_pred_c, reduction="none"),
-                    dim=1)
+                    F.binary_cross_entropy(y_pred_c, y_pred_c, reduction="none"), dim=1
+                )
                 reg = torch.mean(reg)
-            elif self.type == 'KL':
-                reg = torch.mean(
-                    torch.log(y_pred_c),
-                    dim=1) * misclassified_pixels
+            elif self.type == "KL":
+                reg = torch.mean(torch.log(y_pred_c), dim=1) * misclassified_pixels
                 reg = torch.sum(reg) / torch.sum(misclassified_pixels)
 
-        if self.type == 'MEOOD':
+        if self.type == "MEOOD":
             # mask_ood marks out-of-distribution images (1 = OOD)
-            reg = torch.mean(
-                F.binary_cross_entropy(y_pred_c, y_pred_c, reduction="none"),
-                dim=1) * mask_ood
+            reg = (
+                torch.mean(F.binary_cross_entropy(y_pred_c, y_pred_c, reduction="none"), dim=1)
+                * mask_ood
+            )
             reg = torch.sum(reg) / torch.sum(mask_ood)
 
         return reg

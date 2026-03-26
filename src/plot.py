@@ -1,28 +1,41 @@
+from __future__ import annotations
+
 import os.path
 import subprocess
 
-import SimpleITK as sitk
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import SimpleITK as sitk
 from calibration import get_ece
 from medpy.metric.binary import dc as dice_score
 from sklearn.calibration import calibration_curve
 
-sns.set_style('whitegrid')
+sns.set_style("whitegrid")
 
-DEFAULT_COLORS = ['#3498db', '#2ecc71', '#e74c3c']  # colors for each center
-DEFAULT_CENTERS = ['utrecht', 'singapore', 'amsterdam']
+DEFAULT_COLORS = ["#3498db", "#2ecc71", "#e74c3c"]  # colors for each center
+DEFAULT_CENTERS = ["utrecht", "singapore", "amsterdam"]
 
 # DEFAULT_CSV_COLS takes the filenames from above before _training:
-DEFAULT_CSV_COLS = ['pred_wmh_hard', 'pred_wmh_softmax', 'pred_logits', 'gt_wmh',
-                    'pred_mc_logitsmean', 'pred_mc_softmaxmean', 'pred_mc_hardmean',
-                    'pred_mc_uncertmc']
+DEFAULT_CSV_COLS = [
+    "pred_wmh_hard",
+    "pred_wmh_softmax",
+    "pred_logits",
+    "gt_wmh",
+    "pred_mc_logitsmean",
+    "pred_mc_softmaxmean",
+    "pred_mc_hardmean",
+    "pred_mc_uncertmc",
+]
 
 
-def _load_center_csv(path_csvs, center, columns=None):
+def _load_center_csv(
+    path_csvs: str,
+    center: str,
+    columns: list[str] | None = None,
+) -> pd.DataFrame:
     if columns is None:
         columns = DEFAULT_CSV_COLS
     center_path = os.path.join(os.path.abspath(path_csvs), f"{center}.csv")
@@ -31,24 +44,29 @@ def _load_center_csv(path_csvs, center, columns=None):
     return df
 
 
-def get_array_from_nifti(path):
+def get_array_from_nifti(path: str) -> np.ndarray:
     return sitk.GetArrayFromImage(sitk.ReadImage(path))
 
 
-def compare_runs(runs_to_compare, metric_fn, **kwargs):
+def compare_runs(runs_to_compare: dict[str, str], metric_fn, **kwargs) -> None:
     for run_name, run_path in runs_to_compare.items():
         metric_fn(run_path, run_name, **kwargs)
-        print('\n')
+        print("\n")
 
 
-def dice_scores(path_csvs=None, alt_title='', centers=None, colors=None):
+def dice_scores(
+    path_csvs: str | None = None,
+    alt_title: str = "",
+    centers: list[str] | None = None,
+    colors: list[str] | None = None,
+) -> None:
     centers = centers or DEFAULT_CENTERS
     colors = colors or DEFAULT_COLORS
 
     dc = {}
     for center in centers:
         df = _load_center_csv(path_csvs, center)
-        dc[center] = {'hard': []}
+        dc[center] = {"hard": []}
 
         for _, row in df.iterrows():
             pred_hard_path, pred_softmax_path, logits_path, gt_path, _, _, _, _ = row
@@ -60,24 +78,23 @@ def dice_scores(path_csvs=None, alt_title='', centers=None, colors=None):
             dice_hard = dice_score(pred_hard, gt)
 
             # Save results in dictionary
-            dc[center]['hard'].append(dice_hard)
+            dc[center]["hard"].append(dice_hard)
 
-    plt.rcParams.update({'font.size': 12})
+    plt.rcParams.update({"font.size": 12})
     fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(5, 9), sharey=True)
     for i, center in enumerate(centers):
-        sns.boxplot(y=dc[center]['hard'], color=colors[i], ax=axs[i],
-                    showmeans=True)
+        sns.boxplot(y=dc[center]["hard"], color=colors[i], ax=axs[i], showmeans=True)
         axs[i].set_title(f"{center}")
         axs[i].set_ylim([0, 1])
 
-    fig.suptitle((f'Dice Scores ({alt_title})' if alt_title else 'Dice Scores'))
-    fig.text(0.5, 0.04, 'Center', ha='center')
-    fig.text(0.04, 0.5, 'Dice Score', va='center', rotation='vertical')
+    fig.suptitle((f"Dice Scores ({alt_title})" if alt_title else "Dice Scores"))
+    fig.text(0.5, 0.04, "Center", ha="center")
+    fig.text(0.04, 0.5, "Dice Score", va="center", rotation="vertical")
 
     fig.subplots_adjust(top=0.85, wspace=0.05)
 
 
-def entropy(probs, eps=1e-3, apply_mean=True):
+def entropy(probs: np.ndarray, eps: float = 1e-3, apply_mean: bool = True) -> np.ndarray | float:
     probs = np.clip(probs, eps, 1 - eps)
     if apply_mean:
         return np.mean(-probs * np.log(probs) - (1 - probs) * np.log(1 - probs))
@@ -85,8 +102,8 @@ def entropy(probs, eps=1e-3, apply_mean=True):
         return -probs * np.log(probs) - (1 - probs) * np.log(1 - probs)
 
 
-def get_b_mask_path(subj_path):
-    """ Load brain mask
+def get_b_mask_path(subj_path: str) -> str:
+    """Load brain mask
 
     Given a subject path, check if the brain mask exists. If it does, return its
     path. If it doesn't, create it (using FSLs BET) and return its path.
@@ -94,22 +111,26 @@ def get_b_mask_path(subj_path):
     :param subj_path: Path to subject folder
     :return: Brain mask path
     """
-    b_mask_path = os.path.join(subj_path, 'pre', 'T1_brain_mask.nii.gz')
+    b_mask_path = os.path.join(subj_path, "pre", "T1_brain_mask.nii.gz")
     if os.path.exists(b_mask_path):
         return b_mask_path
     else:
-        t1_path = os.path.join(subj_path, 'pre', 'T1.nii.gz')
-        b_t1b_path = os.path.join(subj_path, 'pre', 'T1_brain.nii.gz')
-        cmd = ['bet', t1_path, b_t1b_path, '-m']
+        t1_path = os.path.join(subj_path, "pre", "T1.nii.gz")
+        b_t1b_path = os.path.join(subj_path, "pre", "T1_brain.nii.gz")
+        cmd = ["bet", t1_path, b_t1b_path, "-m"]
         subprocess.run(cmd, check=True)
         print(f"Created brain mask for {subj_path}")
         return b_mask_path
 
 
-def entropy_segment_per_center(path_csvs=None, alt_title=None, centers=None):
+def entropy_segment_per_center(
+    path_csvs: str | None = None,
+    alt_title: str | None = None,
+    centers: list[str] | None = None,
+) -> None:
     centers = centers or DEFAULT_CENTERS
 
-    segment_types = ['pred', 'gt', 'bMask']
+    segment_types = ["pred", "gt", "bMask"]
     ent = {center_type: {} for center_type in segment_types}
 
     for center in centers:
@@ -143,9 +164,9 @@ def entropy_segment_per_center(path_csvs=None, alt_title=None, centers=None):
             entropy_gt_1 = entropy(filt_gt_1)
             entropy_brain = entropy(filt_brain)
 
-            ent['pred'][center][subj] = entropy_pred
-            ent['gt'][center][subj] = entropy_gt_1
-            ent['bMask'][center][subj] = entropy_brain
+            ent["pred"][center][subj] = entropy_pred
+            ent["gt"][center][subj] = entropy_gt_1
+            ent["bMask"][center][subj] = entropy_brain
 
     # # Print the entropy for each center and individual
     # for segment_type in segment_types:
@@ -168,16 +189,24 @@ def entropy_segment_per_center(path_csvs=None, alt_title=None, centers=None):
     plt.show()
 
 
-def append_round(imgs, img, decimals=2):
+def append_round(imgs: np.ndarray, img, decimals: int = 2) -> np.ndarray:
     return np.concatenate((imgs, np.around(np.array(img), decimals)))
 
 
-def probs_hist(path_csvs=None, alt_title=None, centers=None):
+def probs_hist(
+    path_csvs: str | None = None,
+    alt_title: str | None = None,
+    centers: list[str] | None = None,
+) -> None:
     centers = centers or DEFAULT_CENTERS
 
     for center in centers:
-        imgs_smx_0_0, imgs_smx_0_1, imgs_smx_1_0, imgs_smx_1_1 = \
-            np.array([]), np.array([]), np.array([]), np.array([])
+        imgs_smx_0_0, imgs_smx_0_1, imgs_smx_1_0, imgs_smx_1_1 = (
+            np.array([]),
+            np.array([]),
+            np.array([]),
+            np.array([]),
+        )
 
         df = _load_center_csv(path_csvs, center)
 
@@ -206,16 +235,16 @@ def probs_hist(path_csvs=None, alt_title=None, centers=None):
         # Plot histogram for each voxel class
         fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(12, 8))
         axs[0, 0].hist(imgs_smx_0_0, bins=20)
-        axs[0, 0].set_yscale('log')
+        axs[0, 0].set_yscale("log")
         axs[0, 0].set_title(f"{center} - Class 0 - GT 0")
         axs[0, 1].hist(imgs_smx_1_0, bins=20)
-        axs[0, 1].set_yscale('log')
+        axs[0, 1].set_yscale("log")
         axs[0, 1].set_title(f"{center} - Class 1 - GT 0")
         axs[1, 0].hist(imgs_smx_0_1, bins=20)
-        axs[1, 0].set_yscale('log')
+        axs[1, 0].set_yscale("log")
         axs[1, 0].set_title(f"{center} - Class 0 - GT 1")
         axs[1, 1].hist(imgs_smx_1_1, bins=20)
-        axs[1, 1].set_yscale('log')
+        axs[1, 1].set_yscale("log")
         axs[1, 1].set_title(f"{center} - Class 1 - GT 1")
 
         if alt_title:
@@ -224,12 +253,20 @@ def probs_hist(path_csvs=None, alt_title=None, centers=None):
     plt.show()
 
 
-def logits_hist(path_csvs=None, alt_title=None, centers=None):
+def logits_hist(
+    path_csvs: str | None = None,
+    alt_title: str | None = None,
+    centers: list[str] | None = None,
+) -> None:
     centers = centers or DEFAULT_CENTERS
 
     for center in centers:
-        imgs_logits_0_0, imgs_logits_0_1, imgs_logits_1_0, imgs_logits_1_1 = \
-            np.array([]), np.array([]), np.array([]), np.array([])
+        imgs_logits_0_0, imgs_logits_0_1, imgs_logits_1_0, imgs_logits_1_1 = (
+            np.array([]),
+            np.array([]),
+            np.array([]),
+            np.array([]),
+        )
 
         df = _load_center_csv(path_csvs, center)
 
@@ -252,8 +289,6 @@ def logits_hist(path_csvs=None, alt_title=None, centers=None):
             imgs_logits_1_0 = append_round(imgs_logits_1_0, img_logits_1_0)
             imgs_logits_0_1 = append_round(imgs_logits_0_1, img_logits_0_1)
             imgs_logits_1_1 = append_round(imgs_logits_1_1, img_logits_1_1)
-
-        max_val = 100
 
         # Plot histogram for each voxel class
         fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(12, 8))
@@ -280,7 +315,11 @@ def logits_hist(path_csvs=None, alt_title=None, centers=None):
     plt.show()
 
 
-def ece_reliability(path_csvs=None, alt_title=None, centers=None):
+def ece_reliability(
+    path_csvs: str | None = None,
+    alt_title: str | None = None,
+    centers: list[str] | None = None,
+) -> None:
     centers = centers or DEFAULT_CENTERS
 
     for center in centers:
@@ -305,17 +344,16 @@ def ece_reliability(path_csvs=None, alt_title=None, centers=None):
         # Define the number of bins for the reliability diagram
         num_bins = 10
 
-        emp_probs_1, pred_probs_1 = calibration_curve(gt_1, preds_1,
-                                                      n_bins=num_bins)
+        emp_probs_1, pred_probs_1 = calibration_curve(gt_1, preds_1, n_bins=num_bins)
 
         ece_0 = get_ece(preds_1, gt_1)
 
         # Plot the reliability diagram
         fig, ax = plt.subplots(figsize=(6, 6))
-        ax.plot([0, 1], [0, 1], 'k:', label='Perfectly calibrated')
-        ax.plot(pred_probs_1, emp_probs_1, 'o-', label='Foreground')
-        ax.set_xlabel('Predicted probability')
-        ax.set_ylabel('Empirical probability')
+        ax.plot([0, 1], [0, 1], "k:", label="Perfectly calibrated")
+        ax.plot(pred_probs_1, emp_probs_1, "o-", label="Foreground")
+        ax.set_xlabel("Predicted probability")
+        ax.set_ylabel("Empirical probability")
         ax.set_ylim([-0.05, 1.05])
         ax.legend()
         ax.set_title(f"{center} - Reliability diagram\nECE: {ece_0:.4f}")
@@ -325,8 +363,13 @@ def ece_reliability(path_csvs=None, alt_title=None, centers=None):
     plt.show()
 
 
-def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain', centers=None):
-    """ Dice vs entropy plot
+def dice_vs_entropy(
+    path_csvs: str | None = None,
+    alt_title: str | None = None,
+    mask: str = "brain",
+    centers: list[str] | None = None,
+) -> None:
+    """Dice vs entropy plot
 
     Compute for each subject the dice score and the entropy of the softmax, and
     place them in a scatter plot (dice in the y-axis and entropy in the x-axis).
@@ -355,12 +398,12 @@ def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain', centers=None):
             pos_class = pred_softmax[:, :, :, 1].flatten()
 
             # Load the mask
-            if mask == 'brain':
+            if mask == "brain":
                 p_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
                 p_mask = p_mask.flatten()
-            elif mask == 'gt':
+            elif mask == "gt":
                 p_mask = gt.flatten()
-            elif mask == 'softmax':
+            elif mask == "softmax":
                 p_mask = np.where(pos_class > 0.5, 1, 0)
 
             # Compute dice scores
@@ -376,8 +419,7 @@ def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain', centers=None):
 
         dice_ent[center] = np.array(dice_ent[center])
 
-        plt.scatter(dice_ent[center][:, 1], dice_ent[center][:, 0],
-                    label=center)
+        plt.scatter(dice_ent[center][:, 1], dice_ent[center][:, 0], label=center)
 
     plt.xlabel("Entropy")
     plt.ylabel("Dice score")
@@ -392,11 +434,16 @@ def dice_vs_entropy(path_csvs=None, alt_title=None, mask='brain', centers=None):
     plt.show()
 
 
-def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None,
-                             centers=None):
-    """ Uncertainty by condition
+def uncertainty_by_condition(
+    path_csvs: str | None = None,
+    alt_title: str = "",
+    n_samples: int | None = None,
+    centers: list[str] | None = None,
+) -> None:
+    """Uncertainty by condition
 
-    Plots inspired in: uncertainty_by_condition from https://github.com/SteffenCzolbe/probabilistic_segmentation  # noqa
+    Plots inspired in: uncertainty_by_condition from
+    https://github.com/SteffenCzolbe/probabilistic_segmentation
     This will plot the TP, FP, TN, FN uncertainty for each center
 
     :return:
@@ -411,7 +458,7 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None,
             "TP": np.array([]),
             "FP": np.array([]),
             "TN": np.array([]),
-            "FN": np.array([])
+            "FN": np.array([]),
         }
 
         for i, row in df.iterrows():
@@ -465,11 +512,12 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None,
             for category in unc_cond[center].keys():
                 if len(unc_cond[center][category]) > n_samples:
                     unc_cond[center][category] = np.random.choice(
-                        unc_cond[center][category], n_samples, replace=False)
+                        unc_cond[center][category], n_samples, replace=False
+                    )
 
     # Plot Stripplot
     fig, ax = plt.subplots(len(centers), 1, figsize=(4, 10))
-    categories = ['TP', 'FP', 'TN', 'FN']
+    categories = ["TP", "FP", "TN", "FN"]
     for i, center in enumerate(centers):
         sns.stripplot(data=unc_cond[center], ax=ax[i], jitter=True, alpha=0.05)
         ax[i].set_title(center)
@@ -479,17 +527,27 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None,
         ax[i].set_xticklabels(categories)
 
         # Calculate mean and median for each category
-        mean_values = [np.mean(unc_cond[center][category]) for category in
-                       categories]
-        median_values = [np.median(unc_cond[center][category]) for category in
-                         categories]
+        mean_values = [np.mean(unc_cond[center][category]) for category in categories]
+        median_values = [np.median(unc_cond[center][category]) for category in categories]
 
         # Add mean and median markers for each category
         for j, category in enumerate(categories):
-            ax[i].plot(j, mean_values[j], marker='o', color='red',
-                       label='Mean' if j == 0 else '', zorder=10)
-            ax[i].plot(j, median_values[j], marker='o', color='blue',
-                       label='Median' if j == 0 else '', zorder=10)
+            ax[i].plot(
+                j,
+                mean_values[j],
+                marker="o",
+                color="red",
+                label="Mean" if j == 0 else "",
+                zorder=10,
+            )
+            ax[i].plot(
+                j,
+                median_values[j],
+                marker="o",
+                color="blue",
+                label="Median" if j == 0 else "",
+                zorder=10,
+            )
 
         # Add legend
         ax[i].legend()
