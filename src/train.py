@@ -13,8 +13,8 @@ from mlflow import MlflowClient
 from datamodules import WMHDataModule
 from models.unet3d import UNet3D
 from models.wmh_module import WMHModel
-from utils.metrics import compute_metrics
 from utils.cli import load_defaults
+from utils.metrics import compute_metrics
 
 print("Last run on", time.ctime())
 

@@ -12,23 +12,27 @@ Includes MEEP, KL, and MEALL uncertainty calibration losses.
 ```
 src/
   models/
-    unet3d.py           # 3D U-Net (MONAI)
-    wmh_module.py        # Lightning training module
-    inference.py         # MC dropout inference (pure functions)
+    unet3d.py            # 3D U-Net (MONAI)
+    wmh_module.py         # Lightning training module
+    inference.py          # MC dropout inference (pure functions)
   losses/
-    composite.py         # RegularizedLoss (MEEP/KL/MEALL/MEOOD)
-    regularizers.py      # Uncertainty regularization terms
+    composite.py          # RegularizedLoss (MEEP/KL/MEALL/MEOOD)
+    regularizers.py       # Uncertainty regularization terms
   datamodules/
-    WMHDataModule.py     # Data loading and patch sampling
-    transforms.py        # Shared preprocessing pipeline
+    WMHDataModule.py      # Data loading and patch sampling
+    transforms.py         # Shared preprocessing pipeline
   utils/
-    metrics.py           # Dice score computation
-    sitk_io.py           # NIfTI I/O with metadata preservation
-    cli.py               # MLproject defaults loader
-  train.py              # Training entry point
-  predict.py            # Inference entry point
-  plot.py               # Analysis and visualization
-tests/                  # Unit tests (losses, transforms, metrics, CLI)
+    metrics.py            # Dice score computation
+    sitk_io.py            # NIfTI I/O with metadata preservation
+    cli.py                # MLproject defaults loader
+  analysis.py             # Figure data computation with CSV caching
+  plot.py                 # Visualization helpers
+  train.py                # Training entry point
+  predict.py              # Inference entry point
+marimo/
+  viewer.py               # Interactive NIfTI slice viewer (fig1-2)
+  analysis.py             # Analysis dashboard with tabs (fig3-7)
+tests/                    # 78 tests (unit + integration)
 ```
 
 ## Setup
