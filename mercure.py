@@ -41,6 +41,7 @@ def run_inference(
     """Run WMH segmentation with uncertainty estimation."""
     from src.model import WMHModel, UNet3D
     import torchio as tio
+    from src.datamodules.transforms import get_preprocessing
 
     device = _get_device()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -56,12 +57,7 @@ def run_inference(
         t1=tio.ScalarImage(str(t1_path)),
         flair=tio.ScalarImage(str(flair_path)),
     )
-    transform = tio.Compose([
-        tio.ZNormalization(include=["t1", "flair"]),
-        tio.ToCanonical(),
-        tio.Resample("t1"),
-        tio.EnsureShapeMultiple(16),
-    ])
+    transform = get_preprocessing(include_labels=False)
     subject = transform(subject)
 
     # Concatenate T1 + FLAIR

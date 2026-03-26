@@ -5,6 +5,8 @@ import pytorch_lightning as pl
 import torchio as tio
 from torch.utils.data import DataLoader
 
+from src.datamodules.transforms import get_preprocessing
+
 TRAINING = ['tr', 'train', 'training']
 VALIDATION = ['v', 'val', 'validation']
 TEST = ['te', 'test', 'testing']
@@ -218,14 +220,7 @@ class WMHDataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         # Some subjects have also 2 as "other pathology". We remap it to 0
-        self.transforms = tio.Compose([
-            tio.ZNormalization(include=['t1', 'flair']),
-            tio.ToCanonical(),
-            tio.Resample('t1'),
-            tio.RemapLabels({2: 0}, include=['wmh']),
-            tio.OneHot(include=['wmh']),
-            tio.EnsureShapeMultiple(2 ** 4),
-        ])
+        self.transforms = get_preprocessing(include_labels=True)
 
         if stage == "fit" or stage is None:
             self.train_ds = tio.SubjectsDataset(

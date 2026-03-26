@@ -410,47 +410,47 @@ def uncertainty_by_condition(path_csvs=None, alt_title='', n_samples=None):
         for i, row in df.iterrows():
             pred_hard_path, pred_softmax_path, _, gt_path, _, _, _ ,_ = row
 
-        subj_path = os.path.dirname(pred_softmax_path)
+            subj_path = os.path.dirname(pred_softmax_path)
 
-        pred_softmax = nib.load(pred_softmax_path).get_fdata()
-        gt = nib.load(gt_path).get_fdata()
-        b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
+            pred_softmax = nib.load(pred_softmax_path).get_fdata()
+            gt = nib.load(gt_path).get_fdata()
+            b_mask = nib.load(get_b_mask_path(subj_path)).get_fdata()
 
-        gt_one_hot = np.eye(2, dtype=np.uint8)[gt.astype(int)]
+            gt_one_hot = np.eye(2, dtype=np.uint8)[gt.astype(int)]
 
-        neg_sftmx = pred_softmax[:, :, :, 0].flatten()
-        pos_sftmx = pred_softmax[:, :, :, 1].flatten()
-        neg_gt = gt_one_hot[:, :, :, 0].flatten()
-        pos_gt = gt_one_hot[:, :, :, 1].flatten()
+            neg_sftmx = pred_softmax[:, :, :, 0].flatten()
+            pos_sftmx = pred_softmax[:, :, :, 1].flatten()
+            neg_gt = gt_one_hot[:, :, :, 0].flatten()
+            pos_gt = gt_one_hot[:, :, :, 1].flatten()
 
-        b_mask = b_mask.flatten()
+            b_mask = b_mask.flatten()
 
-        # Brain mask
-        thres_brain = np.where(b_mask == 1)[0]
-        pos_brain = pos_sftmx[thres_brain]
-        neg_brain = neg_sftmx[thres_brain]
-        pos_gt_brain = pos_gt[thres_brain]
-        neg_gt_brain = neg_gt[thres_brain]
+            # Brain mask
+            thres_brain = np.where(b_mask == 1)[0]
+            pos_brain = pos_sftmx[thres_brain]
+            neg_brain = neg_sftmx[thres_brain]
+            pos_gt_brain = pos_gt[thres_brain]
+            neg_gt_brain = neg_gt[thres_brain]
 
-        # TP
-        tp = np.where((pos_brain >= 0.5) & (pos_gt_brain == 1))[0]
-        tp_unc = entropy(pos_brain[tp], apply_mean=False)
-        unc_cond[center]["TP"] = np.append(unc_cond[center]["TP"], tp_unc)
+            # TP
+            tp = np.where((pos_brain >= 0.5) & (pos_gt_brain == 1))[0]
+            tp_unc = entropy(pos_brain[tp], apply_mean=False)
+            unc_cond[center]["TP"] = np.append(unc_cond[center]["TP"], tp_unc)
 
-        # FP
-        fp = np.where((pos_brain >= 0.5) & (pos_gt_brain == 0))[0]
-        fp_unc = entropy(pos_brain[fp], apply_mean=False)
-        unc_cond[center]["FP"] = np.append(unc_cond[center]["FP"], fp_unc)
+            # FP
+            fp = np.where((pos_brain >= 0.5) & (pos_gt_brain == 0))[0]
+            fp_unc = entropy(pos_brain[fp], apply_mean=False)
+            unc_cond[center]["FP"] = np.append(unc_cond[center]["FP"], fp_unc)
 
-        # TN
-        tn = np.where((neg_brain >= 0.5) & (neg_gt_brain == 1))[0]
-        tn_unc = entropy(neg_brain[tn], apply_mean=False)
-        unc_cond[center]["TN"] = np.append(unc_cond[center]["TN"], tn_unc)
+            # TN
+            tn = np.where((neg_brain >= 0.5) & (neg_gt_brain == 1))[0]
+            tn_unc = entropy(neg_brain[tn], apply_mean=False)
+            unc_cond[center]["TN"] = np.append(unc_cond[center]["TN"], tn_unc)
 
-        # FN
-        fn = np.where((neg_brain >= 0.5) & (neg_gt_brain == 0))[0]
-        fn_unc = entropy(neg_brain[fn], apply_mean=False)
-        unc_cond[center]["FN"] = np.append(unc_cond[center]["FN"], fn_unc)
+            # FN
+            fn = np.where((neg_brain >= 0.5) & (neg_gt_brain == 0))[0]
+            fn_unc = entropy(neg_brain[fn], apply_mean=False)
+            unc_cond[center]["FN"] = np.append(unc_cond[center]["FN"], fn_unc)
 
         # Since there are too many points on TN, we will sample all categories
         # for having just 100 samples
