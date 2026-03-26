@@ -1,0 +1,37 @@
+apiVersion: ceibo/v1
+kind: ModelPlugin
+
+metadata:
+  name: wmh-segmentation
+  version: 1.0.0
+  author: Franco Matzkin
+  description: >
+    White Matter Hyperintensity segmentation from brain MRI (T1 + FLAIR).
+    3D U-Net with Monte Carlo dropout for uncertainty estimation.
+    Trained on WMH Challenge data (Utrecht, Amsterdam, Singapore).
+    Includes MEEP/KL uncertainty calibration losses.
+  license: MIT
+  regulatory_status: research_only
+
+input:
+  modality: MR
+  body_part: HEAD
+  format: [NIfTI, DICOM]
+  requirements: >
+    Co-registered T1 and FLAIR brain MRI volumes.
+
+output:
+  - type: DICOM-SEG
+    description: Binary WMH segmentation mask (DICOM input only)
+  - type: NIfTI
+    description: Binary WMH mask + probability map + uncertainty map
+  - type: measurements
+    description: WMH volume, lesion count, uncertainty statistics
+
+compute:
+  gpu: optional
+  ram_mb: 8192
+  timeout_seconds: 300
+
+container:
+  image: ceibo-imaging/wmh-segmentation:latest
