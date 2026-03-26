@@ -56,6 +56,7 @@ class WMHModel(L.LightningModule):
         self.best_model_path = best_model_path
 
         # Test-related parameters
+        self.model_path = None
         self.save_preds = kwargs.get('save_predictions', False)
         self.output_dir = kwargs.get('output_dir', None)
         self.saved_preds = []
