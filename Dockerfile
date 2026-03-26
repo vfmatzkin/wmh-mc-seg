@@ -22,21 +22,14 @@ RUN python -m venv /opt/venv && \
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies at build time
-COPY requirements.txt .
 COPY pyproject.toml .
 COPY src/ src/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[dev]"
 
 # Switch to appuser for the remaining operations
 USER appuser
 
-# Install pip tools
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# Install Jupyter and ipykernel
-RUN pip install --no-cache-dir jupyter ipykernel
-
-# Create a kernel for the virtual environment
+# Create a kernel for the virtual environment (jupyter installed via [dev] deps)
 RUN python -m ipykernel install --user --name=wmh-mc-seg-env --display-name="Python (wmh-mc-seg)"
 
 # Make sure the appuser owns the necessary directories

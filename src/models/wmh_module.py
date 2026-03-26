@@ -23,7 +23,7 @@ class WMHModel(L.LightningModule):
     the model and to save the predictions to the disk.
 
     :param net: Model instance
-    :param loss: Criterion function name to use. See the get_criterion method.
+    :param criterion: Loss function name (resolved via RegularizedLoss.from_cli).
     :param learning_rate: Learning rate
     :param optimizer_class: Optimizer class
     :param weight_decay: Weight decay
