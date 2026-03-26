@@ -82,6 +82,22 @@ class WMHModel(L.LightningModule):
 
         self.save_hyperparameters(ignore=["net"])
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        """Cast float64 tensors to float32 for MPS compatibility."""
+
+        def _cast(obj):
+            if isinstance(obj, torch.Tensor):
+                if obj.dtype == torch.float64:
+                    obj = obj.float()
+                return obj.to(device)
+            if isinstance(obj, dict):
+                return {k: _cast(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return type(obj)(_cast(v) for v in obj)
+            return obj
+
+        return _cast(batch)
+
     @classmethod
     def load_test(
         cls,

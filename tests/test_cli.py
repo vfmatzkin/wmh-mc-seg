@@ -13,32 +13,32 @@ from src.utils.cli import load_defaults
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 MAIN_KEYS = {
-    "data-root",
+    "data_root",
     "centers",
-    "split-ratios",
+    "split_ratios",
     "epochs",
-    "batch-size",
+    "batch_size",
     "lr",
     "dropout",
     "loss",
-    "weight-decay",
+    "weight_decay",
     "seed",
-    "patch-size",
-    "samples-per-volume",
-    "queue-length",
-    "tio-num-workers",
-    "reg-start",
-    "meep-lambda",
-    "ood-centers",
+    "patch_size",
+    "samples_per_volume",
+    "queue_length",
+    "tio_num_workers",
+    "reg_start",
+    "meep_lambda",
+    "ood_centers",
 }
 
 TEST_KEYS = {
-    "data-root",
+    "data_root",
     "centers",
-    "split-ratios",
-    "model-path",
-    "batch-size",
-    "patch-size",
+    "split_ratios",
+    "model_path",
+    "batch_size",
+    "patch_size",
     "seed",
 }
 
@@ -66,13 +66,13 @@ def test_load_defaults_test_has_expected_keys():
     assert TEST_KEYS.issubset(result.keys()), f"Missing keys: {TEST_KEYS - result.keys()}"
 
 
-def test_load_defaults_keys_use_hyphens():
+def test_load_defaults_keys_use_underscores():
     for entry_point in ("main", "test"):
         result = load_defaults(entry_point)
         for key in result:
-            assert "_" not in key, (
-                f"Key '{key}' in '{entry_point}' contains underscore — "
-                "expected hyphen-separated keys"
+            assert "-" not in key, (
+                f"Key '{key}' in '{entry_point}' contains hyphen — "
+                "expected underscore-separated keys (click default_map convention)"
             )
 
 
@@ -101,9 +101,9 @@ def test_load_defaults_fixture_returns_expected_keys(mlproject_file):
     """Smoke-test the conftest fixture MLproject."""
     data = yaml.safe_load(mlproject_file.read_text())
     params = data["entry_points"]["main"]["parameters"]
-    keys = {k.replace("_", "-") for k in params}
+    keys = set(params.keys())
     assert "epochs" in keys
-    assert "batch-size" in keys
+    assert "batch_size" in keys
 
 
 # ── helper used by the mock patch ────────────────────────────────────────────
@@ -115,4 +115,4 @@ def _load_defaults_from(base: Path, entry_point: str) -> dict:
         return {}
     data = yaml.safe_load(mlproject_path.read_text())
     params = data["entry_points"][entry_point]["parameters"]
-    return {k.replace("_", "-"): v["default"] for k, v in params.items()}
+    return {k: str(v["default"]) for k, v in params.items()}

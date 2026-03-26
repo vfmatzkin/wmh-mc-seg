@@ -13,25 +13,21 @@ print("Last run on", time.ctime())
 
 
 @click.command(context_settings=dict(default_map=load_defaults("test")))
-@click.option("--data-root", type=click.STRING, required=True, help="Root data folder")
+@click.option("--data-root", type=click.STRING, help="Root data folder")
 @click.option(
     "--centers",
     type=click.STRING,
-    required=True,
     help="Centers used for training (e.g.: training:Utrecht)",
 )
 @click.option(
     "--split-ratios",
     type=click.STRING,
-    required=True,
     help="Ratios for training/validation/test splits",
 )
-@click.option(
-    "--model-path", type=click.STRING, required=True, help="Path to the trained model weights"
-)
+@click.option("--model-path", type=click.STRING, help="Path to the trained model weights")
 @click.option("--batch-size", type=click.INT, default=1, help="Batch size to use during inference")
 @click.option("--patch-size", type=click.INT, default=None, help="Patch size to use for prediction")
-@click.option("--seed", required=True, type=click.INT, help="Random seed for reproducibility")
+@click.option("--seed", type=click.INT, help="Random seed for reproducibility")
 @click.option(
     "--output-dir", type=click.STRING, default=None, help="Output directory for the predictions"
 )

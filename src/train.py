@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import os.path
 import random
@@ -32,62 +34,30 @@ def print_auto_logged_info(r):
 
 
 @click.command(context_settings=dict(default_map=load_defaults("main")))
-@click.option("--data-root", type=click.STRING, required=True, help="Root data folder")
+@click.option("--data-root", default=None, type=click.STRING, help="Root data folder")
+@click.option("--centers", default=None, type=click.STRING, help="Centers for training")
+@click.option("--split-ratios", default=None, type=click.STRING, help="Train/val/test split ratios")
+@click.option("--epochs", default=None, type=click.INT, help="Number of epochs")
+@click.option("--batch-size", default=None, type=click.INT, help="Batch size")
+@click.option("--lr", default=None, type=click.FLOAT, help="Learning rate")
+@click.option("--dropout", default=None, type=click.FLOAT, help="Dropout probability")
+@click.option("--loss", default=None, type=click.STRING, help="Loss function")
+@click.option("--weight-decay", default=None, type=click.FLOAT, help="Weight decay")
+@click.option("--seed", default=None, type=click.INT, help="Random seed")
+@click.option("--patch-size", default=None, type=click.INT, help="Patch size")
+@click.option("--samples-per-volume", default=None, type=click.INT, help="Patches per volume")
+@click.option("--queue-length", default=None, type=click.INT, help="Patch queue length")
+@click.option("--tio-num-workers", default=None, type=click.INT, help="TorchIO workers")
+@click.option("--custom-name", default=None, type=click.STRING, help="Custom run name")
+@click.option("--resume-from", default=None, type=click.STRING, help="Resume from checkpoint")
+@click.option("--lambda-lr", default=None, type=click.FLOAT, help="LambdaLR Scheduler")
+@click.option("--reduce-on-epoch", default=None, type=click.INT, help="When to reduce LR")
+@click.option("--reg-start", default=None, type=click.INT, help="When to start regularization")
 @click.option(
-    "--centers",
-    type=click.STRING,
-    required=True,
-    help="Centers used for training (e.g.: training:Utretch)",
+    "--meep-lambda", default=None, type=click.FLOAT, help="Lambda for MEEP regularization"
 )
 @click.option(
-    "--split-ratios",
-    type=click.STRING,
-    required=True,
-    help="Ratios for training/validation/test splits",
-)
-@click.option("--epochs", required=True, type=click.INT, help="Number of epochs to train the model")
-@click.option(
-    "--batch-size", required=True, type=click.INT, help="Batch size to use during training"
-)
-@click.option("--lr", required=True, type=click.FLOAT, help="Learning rate for optimizer")
-@click.option(
-    "--dropout", required=True, type=click.FLOAT, help="Dropout probability for the model"
-)
-@click.option("--loss", required=True, type=click.STRING, help="Loss function to use")
-@click.option("--weight-decay", required=True, type=click.FLOAT, help="Weight decay for optimizer")
-@click.option("--seed", required=True, type=click.INT, help="Random seed for reproducibility")
-@click.option(
-    "--patch-size", required=True, type=click.types.INT, help="Patch size to use for training"
-)
-@click.option(
-    "--samples-per-volume",
-    required=True,
-    type=click.INT,
-    help="Number of patches to sample per volume",
-)
-@click.option("--queue-length", required=True, type=click.INT, help="Patch queue length")
-@click.option("--tio-num-workers", required=True, type=click.INT, help="Patch queue length")
-@click.option("--custom-name", required=False, type=click.STRING, help="Custom name for the run")
-@click.option("--resume-from", required=False, type=click.STRING, help="Resume from checkpoint")
-@click.option("--lambda-lr", required=False, type=click.FLOAT, help="LambdaLR Scheduler")
-@click.option(
-    "--reduce-on-epoch", required=False, type=click.INT, help="When to reduce LR (scheduler)"
-)
-@click.option(
-    "--reg-start", required=False, type=click.INT, help="When to start adding regularization term"
-)
-@click.option(
-    "--meep-lambda",
-    required=False,
-    type=click.FLOAT,
-    help="Lambda for MEEP (if it was selected a loss that includes it).",
-)
-@click.option(
-    "--ood-centers",
-    required=False,
-    type=click.STRING,
-    help="Centers used as out of distribution data, used for MEOOD "
-    "loss, separated by commas (e.g.: Utretch,Singapore)",
+    "--ood-centers", default=None, type=click.STRING, help="OOD centers (comma-separated)"
 )
 def train(
     data_root,
