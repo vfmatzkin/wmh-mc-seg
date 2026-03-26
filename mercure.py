@@ -45,7 +45,8 @@ def run_inference(
     import torchio as tio
 
     from src.datamodules.transforms import get_preprocessing
-    from src.model import UNet3D, WMHModel
+    from src.models.unet3d import UNet3D
+    from src.models.wmh_module import WMHModel
 
     device = _get_device()
     output_dir.mkdir(parents=True, exist_ok=True)

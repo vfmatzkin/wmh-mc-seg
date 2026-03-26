@@ -6,7 +6,7 @@ import click
 import lightning as L
 
 from datamodules import WMHDataModule
-from model import WMHModel
+from models.wmh_module import WMHModel
 from utils.cli import load_defaults
 
 print("Last run on", time.ctime())

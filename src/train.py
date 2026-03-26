@@ -11,7 +11,9 @@ import torch
 from mlflow import MlflowClient
 
 from datamodules import WMHDataModule
-from model import UNet3D, WMHModel, compute_metrics
+from models.unet3d import UNet3D
+from models.wmh_module import WMHModel
+from utils.metrics import compute_metrics
 from utils.cli import load_defaults
 
 print("Last run on", time.ctime())
