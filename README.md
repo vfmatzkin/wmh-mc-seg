@@ -110,13 +110,32 @@ python src/predict.py \
 
 MC dropout runs multiple forward passes with dropout enabled, then computes mean prediction and per-voxel uncertainty (standard deviation across passes).
 
+## Interactive Analysis
+
+Two [Marimo](https://marimo.io/) apps replace the old Jupyter notebooks.
+
+```bash
+pip install ".[interactive]"
+
+# NIfTI slice viewer (fig1 + fig2)
+marimo run marimo/viewer.py
+
+# Analysis dashboard with tabs for fig3-7
+marimo run marimo/analysis.py
+```
+
+The analysis app supports CSV caching (toggle in sidebar) so heavy computation only runs once. Cached data goes to `data/cache/`.
+
+> [!WARNING]
+> The Marimo apps require prediction outputs from trained models. Run training and inference first.
+
 ## Tests
 
 ```bash
 pytest
 ```
 
-49 unit tests covering the loss registry, preprocessing transforms, metrics, and CLI defaults.
+78 tests covering losses, transforms, metrics, CLI defaults, integration (synthetic data), and analysis cache behavior.
 
 ## Data
 
