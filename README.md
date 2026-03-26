@@ -1,126 +1,144 @@
-WMH MRI Segmentation
-====================
+# WMH MRI Segmentation
 
-The data should be already downloaded and extracted in the `data_root` folder.
+3D U-Net with Monte Carlo dropout for White Matter Hyperintensity segmentation from brain MRI (T1 + FLAIR). Trained on the [WMH Segmentation Challenge](https://wmh.isi.uu.nl/) dataset (Utrecht, Amsterdam, Singapore).
 
-The default hyperparameters are set in the MLproject file.
+Includes MEEP, KL, and MEALL uncertainty calibration losses.
 
-## Environment Setup
+> [!NOTE]
+> This repo is under active refactoring. The original research code (used for my thesis) is available as [`v0.1.0`](../../releases/tag/v0.1.0). The current version modernizes the codebase (Lightning 2.x, PyTorch 2.x, proper packaging) without changing the model architecture or training logic.
 
-You have two options to set up the environment:
-
-### Option 1: Using Docker (Recommended)
-
-1. Install [Docker](https://www.docker.com/products/docker-desktop) and [Docker Compose](https://docs.docker.com/compose/install/)
-
-2. Edit the `docker-compose.yaml` file to map your datasets directory:
-  ```yaml
-  volumes:
-    - .:/app
-    - jupyter-data:/home/appuser/.local/share/jupyter
-    - /path/to/your/datasets:/home/appuser/Code/datasets
-  ```
-
-3. Start the Docker container:
-  ```
-  docker-compose up
-  ```
-
-4. Connect to the Jupyter server:
-  - Open the URL displayed in the terminal (typically http://localhost:8888/?token=...)
-  - When running notebooks in VSCode:
-    - Open a notebook file
-    - Click on the kernel selector in the top-right corner
-    - Choose "Select Kernel..." or "Select Another Kernel..."
-    - Select "Jupyter Server..." and enter the URL from the terminal
-    - Choose the Python kernel from the Docker container
-
-### Option 2: Manual Setup
-
-If you use mlflow, the environment will be created automatically. Otherwise, you can create it manually with:
+## Project Structure
 
 ```
+src/
+  models/
+    unet3d.py           # 3D U-Net (MONAI)
+    wmh_module.py        # Lightning training module
+    inference.py         # MC dropout inference (pure functions)
+  losses/
+    composite.py         # RegularizedLoss (MEEP/KL/MEALL/MEOOD)
+    regularizers.py      # Uncertainty regularization terms
+  datamodules/
+    WMHDataModule.py     # Data loading and patch sampling
+    transforms.py        # Shared preprocessing pipeline
+  utils/
+    metrics.py           # Dice score computation
+    sitk_io.py           # NIfTI I/O with metadata preservation
+    cli.py               # MLproject defaults loader
+  train.py              # Training entry point
+  predict.py            # Inference entry point
+  plot.py               # Analysis and visualization
+tests/                  # Unit tests (losses, transforms, metrics, CLI)
+```
+
+## Setup
+
+### Docker (recommended)
+
+```bash
+# Set your datasets path
+export DATASETS_PATH=/path/to/your/datasets
+
+docker-compose up
+```
+
+This starts a Jupyter server. Connect via the URL in the terminal output.
+
+### Manual
+
+```bash
 python3.10 -m venv env-wmh-mc-seg
-source env-wmh-mc-seg/bin/activate  # On Windows: env-wmh-mc-seg\Scripts\activate
-pip install -r requirements.txt
+source env-wmh-mc-seg/bin/activate
+pip install -e ".[dev]"
 ```
-
-It should be activated before running any of the scripts.
 
 ## Training
-The models can be trained both using the mlflow CLI or calling the src/train.py script. The only difference is that for the CLI, the run name (for mlflow tracking) is set automatically by mlflow, while for the script, it's set according to the centers used for train and the loss function used.
 
-  
-  For both alternatives, the parameters will be taken from the MLProject file first, and the ones passed as arguments will set/override them.
+Default hyperparameters live in `MLproject`. Any CLI argument overrides them.
 
-### With train.py script
-Located in the project folder (where the MLproject file is located), run:
-```
+```bash
 python src/train.py --centers='training:Singapore' --loss='KL'
 ```
 
-### With MLflow CLI
-Located in the project folder (where the MLproject file is located), run:
-```
-mlflow run . -P centers='training:Singapore' -P loss='KL' --env-manager=local --run-name='training_Singapore_KL'
-```
+Or via MLflow:
 
-Note that `mlflow run` is called with `--env-manager=local` to prevent the download/installation of the environment each time. The dependencies can be automatically installed omitting this parameter.
-
-Also, since the run name is set automatically by mlflow, the --run-name parameter can be specified (or not) to override it.
-
-Refer to the [MLflow docs](https://www.mlflow.org/docs/latest/cli.html#mlflow-run) for more info on the CLI.
-
-## Predict
-### With predict.py script
-
-Located in the project folder (where the MLproject file is located), run:
-```
-python src/predict.py --centers='test:Singapore' --model_path='checkpoints/training_Singapore_best.ckpt' --mc_samples=10 --mc_ratio=0.1
+```bash
+mlflow run . -P centers='training:Singapore' -P loss='KL' --env-manager=local
 ```
 
-### With MLflow CLI
+> [!TIP]
+> Run `python src/train.py --help` for the full parameter list.
 
-Located in the project folder (where the MLproject file is located), run:
-```
-mlflow run . -e predict -P centers='test:Singapore' -P model_path='checkpoints/training_Singapore_best.ckpt' -P mc_samples=10 -P mc_ratio=0.1 --env-manager=local
-```
+### Available losses
 
+| Loss | CLI name | Description |
+|------|----------|-------------|
+| Cross Entropy | `ce` | Standard CE |
+| Dice | `dice` | MONAI Dice loss |
+| CE + MEEP | `meep`, `cemeep` | Max Entropy on Erroneous Predictions |
+| CE + KL | `kl`, `cekl` | KL divergence regularization |
+| CE + MEALL | `meall`, `cemeall` | Max Entropy on All predictions |
+| Dice + MEEP | `dicemeep`, `dmeep` | Dice with MEEP regularization |
+| Dice + KL | `dicekl` | Dice with KL regularization |
+| Dice + MEALL | `dicemeall` | Dice with MEALL regularization |
+| CE + MEOOD | `meood`, `cemeood` | Max Entropy on OOD data |
 
-## Parameters
+All regularized losses accept `--meep-lambda` (regularization weight, default 0.3) and `--reg-start` (epoch to start regularization).
 
-The parameters are set in the MLproject file and have default values. Some of them could require tuning:
+### Default hyperparameters
 
-- **train_centers:** Centers used in the format split1:center1,center2;split2:center1,center2, where splits: [training, test] and centers: [Utrecht, Amsterdam, Singapore]
-- **seed:** Random seed used for splitting the data.
-- **split_ratios:** List of ratios for train/validation/test splits, for the training images. The sum of the ratios should be 1.0. Note that this parameter can be used in the test phase as well.
-
-   This parameter is used along with the seed parameter. Each training partition used in train_centers, will be split separately according to this seedn and in case there's more than one center used, then will be merged.
-- **samples_per_volume**: How many patches to take from each volume.
-- **queue_length**: Amount of patches loaded in memory for online processing. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
-- **tio_num_workers**: Number of subprocesses to use for data loading. See [TorchIO docs](https://torchio.readthedocs.io/_modules/torchio/data/queue.html).
-- **mc_ratio**: Ratio of dropout to use for Monte Carlo dropout estimation during inference. This ratio should be lower than the dropout used in training.
-- **mc_samples**: Number of samples to use for Monte Carlo dropout estimation.
-
-### Default hiperparameters for training
-
-| Parameter | Value | 
-| --- | --- |
-| data root | ~/Code/datasets/wmh |
-| centers | training:Utrecht |
-| split ratios | [0.7, 0.1, 0.2] |
+| Parameter | Value |
+|-----------|-------|
 | epochs | 800 |
 | batch size | 64 |
-| lr | 0.001 |
+| learning rate | 0.001 |
 | dropout | 0.2 |
-| loss | MEEP |
-| weight decay | 0 |
-| seed | 42 |
+| loss | DiceMEALL |
 | patch size | 32 |
-| samples per volume | 20 |
-| queue length | 500 |
-| tio num workers | 8 |
-| reg start | 0 |
-| meep lambda | 0.3 |
+| samples per volume | 12 |
+| seed | 42 |
 
-Run `python src/train.py --help` for more info on the parameters.
+## Inference
+
+```bash
+python src/predict.py \
+  --centers='test:Singapore' \
+  --model-path='checkpoints/training_Singapore_best.ckpt' \
+  --mc-samples=10 \
+  --mc-ratio=0.1
+```
+
+MC dropout runs multiple forward passes with dropout enabled, then computes mean prediction and per-voxel uncertainty (standard deviation across passes).
+
+## Tests
+
+```bash
+pytest
+```
+
+49 unit tests covering the loss registry, preprocessing transforms, metrics, and CLI defaults.
+
+## Data
+
+Expects the [WMH Challenge](https://wmh.isi.uu.nl/) dataset structured as:
+
+```
+data_root/
+  training/
+    Utrecht/
+      0/
+        pre/T1.nii.gz
+        pre/FLAIR.nii.gz
+        wmh.nii.gz
+    Amsterdam/
+      GE3T/0/...
+      GE1T5/0/...
+    Singapore/
+      0/...
+  test/
+    ...
+```
+
+## Stack
+
+Python 3.10+, PyTorch 2.x, Lightning 2.x, MONAI, TorchIO, MLflow.
