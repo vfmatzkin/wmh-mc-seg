@@ -1,19 +1,18 @@
 import ast
 import os
-import sys
 import time
 
 import click
 import pytorch_lightning as pl
-import yaml
 
 from datamodules import WMHDataModule
 from model import WMHModel
+from utils.cli import load_defaults
 
 print('Last run on', time.ctime())
 
 
-@click.command()
+@click.command(context_settings=dict(default_map=load_defaults('test')))
 @click.option('--data-root', type=click.STRING, required=True,
               help="Root data folder")
 @click.option('--centers', type=click.STRING, required=True,
@@ -63,31 +62,6 @@ def predict(data_root, centers, split_ratios, model_path, batch_size,
 if __name__ == '__main__':
     if os.getcwd().endswith('src'):
         os.chdir('..')
-
-    if len(sys.argv) == 1:
-        with open('MLproject', 'r') as f:
-            mlproject = yaml.safe_load(f)
-        params = mlproject['entry_points']['test']['parameters']
-        sys.argv += [f"--{k.replace('_', '-')}="
-                     f"{v['default']}" for k, v in params.items()]
-    elif len(sys.argv) > 1:
-        with open('MLproject', 'r') as f:
-            mlproject = yaml.safe_load(f)
-        params = mlproject['entry_points']['test']['parameters']
-        for arg in sys.argv[1:]:
-            if arg.startswith('--'):
-                # The value could be after a '=' or in the next arg
-                if '=' in arg:
-                    key, value = arg.split('=')
-                else:
-                    key = arg
-                    value = sys.argv[sys.argv.index(arg) + 1]
-                key = key.replace('--', '').replace('-', '_')
-                params[key] = {'default': value}
-        sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}="
-                                    f"{v['default']}" for k, v in
-                                    params.items()]
-
     predict()
 
 

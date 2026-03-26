@@ -1,8 +1,6 @@
 import ast
 import os.path
 import random
-import shutil
-import sys
 import time
 from datetime import datetime
 
@@ -10,11 +8,11 @@ import click
 import mlflow.sklearn
 import pytorch_lightning as pl
 import torch
-import yaml
 from mlflow import MlflowClient
 
 from datamodules import WMHDataModule
 from model import WMHModel, compute_metrics, UNet3D
+from utils.cli import load_defaults
 
 print('Last run on', time.ctime())
 
@@ -31,7 +29,7 @@ def print_auto_logged_info(r):
           f"tags: {tags}")
 
 
-@click.command()
+@click.command(context_settings=dict(default_map=load_defaults('main')))
 @click.option('--data-root', type=click.STRING, required=True,
               help="Root data folder")
 @click.option('--centers', type=click.STRING, required=True,
@@ -165,31 +163,4 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
 if __name__ == "__main__":
     if os.getcwd().endswith('src'):
         os.chdir('..')
-
-    if len(sys.argv) == 1:
-        with open('MLproject', 'r') as f:
-            mlproject = yaml.safe_load(f)
-        params = mlproject['entry_points']['main']['parameters']
-        sys.argv += [f"--{k.replace('_', '-')}="
-                     f"{v['default']}" for k, v in params.items()]
-    elif len(sys.argv) == 2 and sys.argv[1] in ['--help', '-h']:
-        train()
-    # Else, set MLproject as default parameters and update with passed args
-    elif len(sys.argv) > 1:
-        with open('MLproject', 'r') as f:
-            mlproject = yaml.safe_load(f)
-        params = mlproject['entry_points']['main']['parameters']
-        for arg in sys.argv[1:]:
-            if arg.startswith('--'):
-                # The value could be after a '=' or in the next arg
-                if '=' in arg:
-                    key, value = arg.split('=')
-                else:
-                    key = arg
-                    value = sys.argv[sys.argv.index(arg) + 1]
-                key = key.replace('--', '').replace('-', '_')
-                params[key] = {'default': value}
-        sys.argv = [sys.argv[0]] + [f"--{k.replace('_', '-')}={v['default']}"
-                                    for k, v in params.items()]
-
     train()
