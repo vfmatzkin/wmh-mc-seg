@@ -6,7 +6,7 @@ from datetime import datetime
 
 import click
 import mlflow.sklearn
-import pytorch_lightning as pl
+import lightning as L
 import torch
 from mlflow import MlflowClient
 
@@ -121,7 +121,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             mlflow.log_params(params)
 
         best_model_path = os.path.join('checkpoints', f'{run_name}_best.ckpt')
-        top3_chk = pl.callbacks.ModelCheckpoint(
+        top3_chk = L.pytorch.callbacks.ModelCheckpoint(
             monitor='val_loss',
             dirpath=os.path.join('checkpoints', run_name),
             filename="{epoch:02d}-{val_loss:.4f}",
@@ -129,7 +129,7 @@ def train(data_root, centers, split_ratios, epochs, batch_size, lr, dropout,
             mode='min',
         )
 
-        trainer = pl.Trainer(
+        trainer = L.Trainer(
             accelerator='auto',
             max_epochs=epochs,
             callbacks=[top3_chk],

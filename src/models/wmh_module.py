@@ -4,7 +4,7 @@ import shutil
 
 import SimpleITK as sitk
 import mlflow
-import pytorch_lightning as pl
+import lightning as L
 import torch
 import torch.nn.functional as F
 import torchio as tio
@@ -15,7 +15,7 @@ from utils.metrics import compute_metrics
 from utils.sitk_io import restore_metadata_as_sitk
 
 
-class WMHModel(pl.LightningModule):
+class WMHModel(L.LightningModule):
     """ WMHModel
 
     This class implements the WMH segmentation model. It is a subclass of the
@@ -85,7 +85,6 @@ class WMHModel(pl.LightningModule):
                 optimizer,
                 lr_lambda=lambda epoch: self.lambda_lr ** (
                         epoch // self.reduce_on_epoch),
-                verbose=True
             )
             return [optimizer], [scheduler]
         return optimizer
@@ -307,13 +306,17 @@ class WMHModel(pl.LightningModule):
 
     def on_train_epoch_end(self):  # Todo change filtering _epoch
         metr, ce = self.trainer.callback_metrics, self.current_epoch
-        mlflow.log_metric('train_loss', metr['train_loss_epoch'].item(), ce)
-        mlflow.log_metric('train_dice', metr['train_dice_epoch'].item(), ce)
+        if 'train_loss_epoch' in metr:
+            mlflow.log_metric('train_loss', metr['train_loss_epoch'].item(), ce)
+        if 'train_dice_epoch' in metr:
+            mlflow.log_metric('train_dice', metr['train_dice_epoch'].item(), ce)
 
     def on_validation_epoch_end(self):
         metr, ce = self.trainer.callback_metrics, self.current_epoch
-        mlflow.log_metric('val_loss', metr['val_loss_epoch'].item(), ce)
-        mlflow.log_metric('val_dice', metr['val_dice_epoch'].item(), ce)
+        if 'val_loss_epoch' in metr:
+            mlflow.log_metric('val_loss', metr['val_loss_epoch'].item(), ce)
+        if 'val_dice_epoch' in metr:
+            mlflow.log_metric('val_dice', metr['val_dice_epoch'].item(), ce)
         best_chk_path = self.trainer.checkpoint_callback.best_model_path
         if best_chk_path != '' and self.best_model_path is not None:
             shutil.copy(best_chk_path, self.best_model_path)

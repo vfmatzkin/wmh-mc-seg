@@ -3,7 +3,7 @@ import os
 import time
 
 import click
-import pytorch_lightning as pl
+import lightning as L
 
 from datamodules import WMHDataModule
 from model import WMHModel
@@ -53,7 +53,7 @@ def predict(data_root, centers, split_ratios, model_path, batch_size,
     model = WMHModel.load_test(model_path, save_predictions, output_dir,
                                patch_size, mc_ratio, mc_samples)
 
-    trainer = pl.Trainer()
+    trainer = L.Trainer()
     trainer.test(model, dataloader)
 
     model.save_preds_info(csv_preds, model_path)

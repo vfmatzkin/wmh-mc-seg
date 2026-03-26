@@ -1,7 +1,7 @@
 import os
 import random
 
-import pytorch_lightning as pl
+import lightning as L
 import torchio as tio
 from torch.utils.data import DataLoader
 
@@ -26,7 +26,7 @@ class MySubject(tio.Subject):
         return super().check_consistent_attribute(*args, **kwargs)
 
 
-class WMHDataModule(pl.LightningDataModule):
+class WMHDataModule(L.LightningDataModule):
     """ WMHDataModule
 
     This class is used to load the WMH dataset and prepare the data for
@@ -222,14 +222,14 @@ class WMHDataModule(pl.LightningDataModule):
         # Some subjects have also 2 as "other pathology". We remap it to 0
         self.transforms = get_preprocessing(include_labels=True)
 
-        if stage == "fit" or stage is None:
+        if stage == "fit":
             self.train_ds = tio.SubjectsDataset(
                 self.samples_per_volume * self.subj_train, self.transforms
             )
             self.val_ds = tio.SubjectsDataset(
                 self.samples_per_volume * self.subj_val, self.transforms
             )
-        if stage == "test" or stage is None:
+        if stage == "test":
             if self.split_ratios[2] == 0:
                 print(f'W: Test split ratio is 0. Will predict on all data '
                       f'({self.centers}).')
