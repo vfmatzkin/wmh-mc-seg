@@ -109,7 +109,9 @@ class WMHModel(L.LightningModule):
         mc_dropout_samples: int,
     ) -> WMHModel:
         model_path = os.path.expanduser(model_path)
-        obj = WMHModel.load_from_checkpoint(model_path, net=UNet3D(mc_dropout_ratio))
+        obj = WMHModel.load_from_checkpoint(
+            model_path, net=UNet3D(mc_dropout_ratio), weights_only=False
+        )
         obj.model_path = os.path.abspath(model_path)
         obj.save_preds = save_predictions
         obj.output_dir = output_dir

@@ -209,7 +209,8 @@ def save_predictions(
         for img_name, img in imgs.items():
             paths.append(os.path.join(pred_folder, img_name))
             if img is not None:
-                im_o_sp = restore_metadata_as_sitk(img, t1_path)
+                img_cpu = img.detach().cpu() if isinstance(img, torch.Tensor) else img
+                im_o_sp = restore_metadata_as_sitk(img_cpu, t1_path)
                 sitk.WriteImage(im_o_sp, paths[-1])
         saved.append(paths)
         print(f"saved preds for {pred_folder}")
