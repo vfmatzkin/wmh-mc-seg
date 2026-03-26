@@ -1,4 +1,4 @@
-FROM python:3.8
+FROM python:3.10-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -23,7 +23,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies at build time
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml .
+COPY src/ src/
+RUN pip install --no-cache-dir .
 
 # Switch to appuser for the remaining operations
 USER appuser
