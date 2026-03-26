@@ -5,15 +5,10 @@ services:
       dockerfile: Dockerfile
     volumes:
       - .:/app
-      - jupyter-data:/home/appuser/.local/share/jupyter
       - ${DATASETS_PATH}:/home/appuser/Code/datasets
     working_dir: /app
-    command: >
-      jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+    command: bash
     ports:
-      - "8888:8888"
+      - "8765:8765"
     tty: true
     stdin_open: true
-
-volumes:
-  jupyter-data:

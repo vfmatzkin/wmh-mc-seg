@@ -28,9 +28,6 @@ dependencies = [
 dev = [
     "matplotlib>=3.7",
     "seaborn>=0.12",
-    "jupyter",
-    "notebook",
-    "ipykernel",
     "statannotations>=0.6",
     "scikit-learn>=1.2",
     "uncertainty-calibration",

@@ -26,11 +26,8 @@ COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir ".[dev]"
 
-# Switch to appuser for the remaining operations
+# Switch to appuser
 USER appuser
-
-# Create a kernel for the virtual environment (jupyter installed via [dev] deps)
-RUN python -m ipykernel install --user --name=wmh-mc-seg-env --display-name="Python (wmh-mc-seg)"
 
 # Make sure the appuser owns the necessary directories
 USER root

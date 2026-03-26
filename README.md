@@ -37,18 +37,15 @@ tests/                    # 78 tests (unit + integration)
 
 ## Setup
 
-### Docker (recommended)
+### Docker
 
 ```bash
-# Set your datasets path
 export DATASETS_PATH=/path/to/your/datasets
-
-docker-compose up
+docker-compose up -d
+docker-compose exec wmh-mc-seg bash
 ```
 
-This starts a Jupyter server. Connect via the URL in the terminal output.
-
-### Manual
+### Manual (recommended)
 
 ```bash
 python3.10 -m venv env-wmh-mc-seg
